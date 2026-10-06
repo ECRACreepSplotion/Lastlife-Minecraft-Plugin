@@ -44,8 +44,10 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EnderDragonChangePhaseEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
@@ -54,9 +56,11 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.Keyed;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -74,6 +78,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey witherBootsKey;
     private NamespacedKey witherArmorKey;
     private NamespacedKey demonicInitiatorKey;
+    private NamespacedKey demonicInitiatorRecipeKey;
     private NamespacedKey empoweredDragonKey;
     private NamespacedKey dragonArmorKey;
     private NamespacedKey dragonChestplateKey;
@@ -91,6 +96,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         witherBootsKey = new NamespacedKey(this, "wither_boots");
         witherArmorKey = new NamespacedKey(this, "wither_armor");
         demonicInitiatorKey = new NamespacedKey(this, "demonic_initiator");
+        demonicInitiatorRecipeKey = new NamespacedKey(this, "demonic_initiator");
         empoweredDragonKey = new NamespacedKey(this, "empowered_dragon");
         dragonArmorKey = new NamespacedKey(this, "dragon_armor");
         dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
@@ -228,8 +234,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onEnderDragonDeath(EntityDeathEvent event) {
         if (!(event.getEntity() instanceof EnderDragon dragon)
-                || !isEmpoweredDragon(dragon)
-                || ThreadLocalRandom.current().nextDouble() >= 0.70) {
+                || !isEmpoweredDragon(dragon)) {
+            return;
+        }
+
+        int guaranteedChestplates = playerData.getInt("dragon.guaranteed-chestplates", 0);
+        if (guaranteedChestplates > 0) {
+            event.getDrops().add(createDragonArmor("NETHERITE_CHESTPLATE", "Chestplate", true));
+            playerData.set("dragon.guaranteed-chestplates", guaranteedChestplates - 1);
+            savePlayerData();
+            return;
+        }
+        if (ThreadLocalRandom.current().nextDouble() >= 0.70) {
             return;
         }
 
@@ -282,6 +298,23 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     public void onInventoryDrag(InventoryDragEvent event) {
         if (event.getWhoClicked() instanceof Player player) {
             refreshMaxHealthNextTick(player);
+        }
+    }
+
+    @EventHandler
+    public void onPrepareDemonicInitiator(PrepareItemCraftEvent event) {
+        if (isDemonicInitiatorRecipe(event.getRecipe())) {
+            event.getInventory().setResult(isDemonicInitiatorRecipeInput(event.getInventory().getMatrix())
+                    ? createDemonicInitiator()
+                    : null);
+        }
+    }
+
+    @EventHandler
+    public void onCraftDemonicInitiator(CraftItemEvent event) {
+        if (isDemonicInitiatorRecipe(event.getRecipe())
+                && !isDemonicInitiatorRecipeInput(event.getInventory().getMatrix())) {
+            event.setCancelled(true);
         }
     }
 
@@ -566,24 +599,27 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void registerDemonicInitiatorRecipe() {
-        ShapedRecipe recipe = new ShapedRecipe(new NamespacedKey(this, "demonic_initiator"), createDemonicInitiator());
+        Bukkit.removeRecipe(demonicInitiatorRecipeKey);
+        ShapedRecipe recipe = new ShapedRecipe(demonicInitiatorRecipeKey, createDemonicInitiator());
         recipe.shape("DHD", "DCD", "DDD");
         recipe.setIngredient('D', XMaterial.matchXMaterial("DRAGON_HEAD")
                 .map(XMaterial::parseMaterial)
                 .orElseThrow(() -> new IllegalStateException("Dragon head is unavailable")));
-        recipe.setIngredient('H', new RecipeChoice.ExactChoice(
-                createWardenArmor("NETHERITE_HELMET", "Helmet", false)));
-        recipe.setIngredient('C', new RecipeChoice.ExactChoice(
-                createWitherArmor("NETHERITE_CHESTPLATE", "Chestplate", false)));
+        recipe.setIngredient('H', XMaterial.matchXMaterial("NETHER_STAR")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Nether star is unavailable")));
+        recipe.setIngredient('C', XMaterial.matchXMaterial("SCULK_CATALYST")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Sculk catalyst is unavailable")));
         Bukkit.addRecipe(recipe);
     }
 
     private ItemStack createDemonicInitiator() {
-        ItemStack initiator = XMaterial.matchXMaterial("DRAGON_HEAD")
+        ItemStack initiator = XMaterial.matchXMaterial("SKELETON_SKULL")
                 .map(XMaterial::parseItem)
-                .orElseThrow(() -> new IllegalStateException("Dragon head is unavailable"));
+                .orElseThrow(() -> new IllegalStateException("Skeleton skull is unavailable"));
         ItemMeta meta = initiator.getItemMeta();
-        meta.setDisplayName(ChatColor.DARK_PURPLE + "Demonic Initiator");
+        meta.setDisplayName(ChatColor.RED + "Demonic Initiator");
         meta.getPersistentDataContainer().set(demonicInitiatorKey, PersistentDataType.BYTE, (byte) 1);
         XEnchantment.matchXEnchantment("UNBREAKING")
                 .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
@@ -591,8 +627,39 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return initiator;
     }
 
+    private boolean isDemonicInitiatorRecipe(Recipe recipe) {
+        return recipe instanceof Keyed keyed && demonicInitiatorRecipeKey.equals(keyed.getKey());
+    }
+
+    private boolean isDemonicInitiatorRecipeInput(ItemStack[] matrix) {
+        if (matrix.length != 9) {
+            return false;
+        }
+        for (int slot = 0; slot < matrix.length; slot++) {
+            if (slot == 1) {
+                if (matrix[slot] == null || !"NETHER_STAR".equals(matrix[slot].getType().name())) {
+                    return false;
+                }
+            } else if (slot == 4) {
+                if (matrix[slot] == null || !"SCULK_CATALYST".equals(matrix[slot].getType().name())) {
+                    return false;
+                }
+            } else if (matrix[slot] == null || !"DRAGON_HEAD".equals(matrix[slot].getType().name())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void empowerDragon(EnderDragon dragon) {
         dragon.getPersistentDataContainer().set(empoweredDragonKey, PersistentDataType.BYTE, (byte) 1);
+        int empowermentCount = playerData.getInt("dragon.empowerment-count", 0) + 1;
+        playerData.set("dragon.empowerment-count", empowermentCount);
+        if (empowermentCount % 15 == 0) {
+            playerData.set("dragon.guaranteed-chestplates",
+                    playerData.getInt("dragon.guaranteed-chestplates", 0) + 1);
+        }
+        savePlayerData();
         AttributeInstance healthAttribute = dragon.getAttribute(maxHealthAttribute);
         if (healthAttribute != null) {
             healthAttribute.setBaseValue(healthAttribute.getBaseValue() * 10.0);
