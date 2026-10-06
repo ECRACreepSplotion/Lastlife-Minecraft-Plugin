@@ -123,7 +123,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onWardenDeath(EntityDeathEvent event) {
         if (!(event.getEntity() instanceof Warden)
-                || ThreadLocalRandom.current().nextDouble() >= 0.05) {
+                || ThreadLocalRandom.current().nextDouble() >= 0.15) {
             return;
         }
 
