@@ -24,9 +24,11 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Evoker;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Warden;
+import org.bukkit.entity.Wither;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
@@ -54,6 +56,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey evolvedTotemUsesKey;
     private NamespacedKey wardenArmorKey;
     private NamespacedKey wardenLeggingsKey;
+    private NamespacedKey witherBootsKey;
 
     @Override
     public void onEnable() {
@@ -64,6 +67,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         evolvedTotemUsesKey = new NamespacedKey(this, "evolved_totem_uses");
         wardenArmorKey = new NamespacedKey(this, "warden_armor");
         wardenLeggingsKey = new NamespacedKey(this, "warden_leggings");
+        witherBootsKey = new NamespacedKey(this, "wither_boots");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -75,7 +79,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         getCommand("sethearts").setExecutor(this);
         getCommand("checkhearts").setExecutor(this);
         Bukkit.getScheduler().runTaskTimer(this,
-                () -> Bukkit.getOnlinePlayers().forEach(this::refreshWardenLeggingsEffects), 0L, 20L);
+                () -> Bukkit.getOnlinePlayers().forEach(player -> {
+                    refreshWardenLeggingsEffects(player);
+                    refreshWitherBootsEffects(player);
+                }), 0L, 20L);
     }
 
     @Override
@@ -139,6 +146,64 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             event.getDrops().add(createWardenArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
         } else {
             event.getDrops().add(createWardenArmor("NETHERITE_LEGGINGS", "Leggings", true));
+        }
+    }
+
+    @EventHandler
+    public void onWitherDeath(EntityDeathEvent event) {
+        if (!(event.getEntity() instanceof Wither)
+                || ThreadLocalRandom.current().nextDouble() >= 0.05) {
+            return;
+        }
+
+        String environment = event.getEntity().getWorld().getEnvironment().name();
+        double pieceRoll = ThreadLocalRandom.current().nextDouble();
+        if ("NETHER".equals(environment)) {
+            if (pieceRoll < 0.10) {
+                event.getDrops().add(createWitherArmor("NETHERITE_BOOTS", "Boots", true));
+            } else if (pieceRoll < 0.50) {
+                event.getDrops().add(createWitherArmor("NETHERITE_HELMET", "Helmet", false));
+            } else if (pieceRoll < 0.60) {
+                event.getDrops().add(createWitherArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
+            } else {
+                event.getDrops().add(createWitherArmor("NETHERITE_LEGGINGS", "Leggings", false));
+            }
+        } else if ("THE_END".equals(environment)) {
+            if (pieceRoll < 0.40) {
+                event.getDrops().add(createWitherArmor("NETHERITE_HELMET", "Helmet", false));
+            } else if (pieceRoll < 0.60) {
+                event.getDrops().add(createWitherArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
+            } else {
+                event.getDrops().add(createWitherArmor("NETHERITE_LEGGINGS", "Leggings", false));
+            }
+        } else {
+            if (pieceRoll < 0.03) {
+                event.getDrops().add(createWitherArmor("NETHERITE_BOOTS", "Boots", true));
+            } else if (pieceRoll < 0.43) {
+                event.getDrops().add(createWitherArmor("NETHERITE_HELMET", "Helmet", false));
+            } else if (pieceRoll < 0.60) {
+                event.getDrops().add(createWitherArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
+            } else {
+                event.getDrops().add(createWitherArmor("NETHERITE_LEGGINGS", "Leggings", false));
+            }
+        }
+    }
+
+    @EventHandler
+    public void onWitherSpawn(CreatureSpawnEvent event) {
+        if (!(event.getEntity() instanceof Wither wither)) {
+            return;
+        }
+
+        double multiplier = switch (wither.getWorld().getEnvironment().name()) {
+            case "NORMAL" -> 2.0;
+            case "NETHER" -> 5.0;
+            default -> 1.0;
+        };
+        AttributeInstance healthAttribute = wither.getAttribute(maxHealthAttribute);
+        if (healthAttribute != null) {
+            healthAttribute.setBaseValue(healthAttribute.getBaseValue() * multiplier);
+            wither.setHealth(healthAttribute.getValue());
         }
     }
 
@@ -358,6 +423,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
     }
 
+    private void refreshWitherBootsEffects(Player player) {
+        if (isWitherBoots(player.getInventory().getBoots())) {
+            XPotion.matchXPotion("SPEED")
+                    .map(potion -> potion.buildPotionEffect(40, 2))
+                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+        } else {
+            XPotion.matchXPotion("SPEED")
+                    .map(potion -> potion.buildPotionEffect(1, 2).getType())
+                    .ifPresent(player::removePotionEffect);
+        }
+    }
+
     private ItemStack createEvolvedTotem() {
         ItemStack totem = XMaterial.matchXMaterial("TOTEM_OF_UNDYING")
                 .map(XMaterial::parseItem)
@@ -391,12 +468,42 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return armor;
     }
 
+    private ItemStack createWitherArmor(String materialName, String pieceName, boolean boots) {
+        ItemStack armor = XMaterial.matchXMaterial(materialName)
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException(materialName + " is unavailable"));
+        ItemMeta meta = armor.getItemMeta();
+        meta.setDisplayName(ChatColor.GRAY + "The Wither's Netherite " + pieceName);
+        XEnchantment.matchXEnchantment("PROTECTION")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+        if (boots) {
+            meta.setUnbreakable(true);
+            meta.getPersistentDataContainer().set(witherBootsKey, PersistentDataType.BYTE, (byte) 1);
+            XEnchantment.matchXEnchantment("DEPTH_STRIDER")
+                    .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+            XEnchantment.matchXEnchantment("FEATHER_FALLING")
+                    .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+            XEnchantment.matchXEnchantment("SOUL_SPEED")
+                    .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+        }
+        armor.setItemMeta(meta);
+        return armor;
+    }
+
     private boolean isWardenLeggings(ItemStack item) {
         if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
             return false;
         }
         return item.getItemMeta().getPersistentDataContainer()
                 .has(wardenLeggingsKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isWitherBoots(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(witherBootsKey, PersistentDataType.BYTE);
     }
 
     private void refreshMaxHealthNextTick(Player player) {
