@@ -1,11 +1,17 @@
 package com.kodari.lastheart;
 
 import com.cryptomorin.xseries.XAttribute;
+import com.cryptomorin.xseries.XEnchantment;
+import com.cryptomorin.xseries.XMaterial;
 import java.io.File;
 import java.io.IOException;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.command.Command;
@@ -14,13 +20,22 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.entity.Evoker;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.entity.EntityResurrectEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class LastHeartPlugin extends JavaPlugin implements Listener, CommandExecutor {
@@ -30,12 +45,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private File playerDataFile;
     private FileConfiguration playerData;
     private Attribute maxHealthAttribute;
+    private NamespacedKey evolvedTotemKey;
+    private NamespacedKey evolvedTotemUsesKey;
 
     @Override
     public void onEnable() {
         maxHealthAttribute = XAttribute.of("max_health")
                 .map(XAttribute::get)
                 .orElseThrow(() -> new IllegalStateException("Could not find the max health attribute"));
+        evolvedTotemKey = new NamespacedKey(this, "evolved_totem");
+        evolvedTotemUsesKey = new NamespacedKey(this, "evolved_totem_uses");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -83,6 +102,68 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         playerData.set(playerPath(playerId) + ".hearts", hearts + 1);
         savePlayerData();
+    }
+
+    @EventHandler
+    public void onEvokerDeath(EntityDeathEvent event) {
+        if (event.getEntity() instanceof Evoker
+                && ThreadLocalRandom.current().nextDouble() < 0.10) {
+            event.getDrops().add(createEvolvedTotem());
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerResurrect(EntityResurrectEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+
+        EquipmentSlot hand = isTotemOfUndying(player.getInventory().getItemInMainHand())
+                ? EquipmentSlot.HAND
+                : EquipmentSlot.OFF_HAND;
+        ItemStack usedTotem = hand == EquipmentSlot.HAND
+                ? player.getInventory().getItemInMainHand()
+                : player.getInventory().getItemInOffHand();
+        if (!isEvolvedTotem(usedTotem)) {
+            return;
+        }
+
+        ItemMeta meta = usedTotem.getItemMeta();
+        int uses = meta.getPersistentDataContainer().getOrDefault(
+                evolvedTotemUsesKey, PersistentDataType.INTEGER, 1);
+        if (uses <= 1) {
+            return;
+        }
+
+        ItemStack remainingTotem = usedTotem.clone();
+        remainingTotem.setAmount(1);
+        ItemMeta remainingMeta = remainingTotem.getItemMeta();
+        remainingMeta.getPersistentDataContainer().set(
+                evolvedTotemUsesKey, PersistentDataType.INTEGER, uses - 1);
+        remainingTotem.setItemMeta(remainingMeta);
+
+        Bukkit.getScheduler().runTask(this, () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+
+            PlayerInventory inventory = player.getInventory();
+            ItemStack handItem = hand == EquipmentSlot.HAND
+                    ? inventory.getItemInMainHand()
+                    : inventory.getItemInOffHand();
+            if (handItem == null || handItem.getType().isAir()) {
+                if (hand == EquipmentSlot.HAND) {
+                    inventory.setItemInMainHand(remainingTotem);
+                } else {
+                    inventory.setItemInOffHand(remainingTotem);
+                }
+                return;
+            }
+
+            Map<Integer, ItemStack> leftovers = inventory.addItem(remainingTotem);
+            leftovers.values().forEach(item -> player.getWorld()
+                    .dropItemNaturally(player.getLocation(), item));
+        });
     }
 
     @EventHandler
@@ -206,6 +287,32 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         } else if (player.getHealth() > maxHealth) {
             player.setHealth(maxHealth);
         }
+    }
+
+    private ItemStack createEvolvedTotem() {
+        ItemStack totem = XMaterial.matchXMaterial("TOTEM_OF_UNDYING")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Totem of Undying is unavailable"));
+        ItemMeta meta = totem.getItemMeta();
+        meta.setDisplayName(ChatColor.LIGHT_PURPLE + "V1 Evolved Totem");
+        meta.getPersistentDataContainer().set(evolvedTotemKey, PersistentDataType.BYTE, (byte) 1);
+        meta.getPersistentDataContainer().set(evolvedTotemUsesKey, PersistentDataType.INTEGER, 2);
+        XEnchantment.matchXEnchantment("UNBREAKING")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
+        totem.setItemMeta(meta);
+        return totem;
+    }
+
+    private boolean isEvolvedTotem(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(evolvedTotemKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isTotemOfUndying(ItemStack item) {
+        return item != null && "TOTEM_OF_UNDYING".equals(item.getType().name());
     }
 
     private int getHearts(UUID playerId) {
