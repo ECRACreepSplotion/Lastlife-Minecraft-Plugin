@@ -152,7 +152,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onWitherDeath(EntityDeathEvent event) {
         if (!(event.getEntity() instanceof Wither)
-                || ThreadLocalRandom.current().nextDouble() >= 0.05) {
+                || ThreadLocalRandom.current().nextDouble() >= 0.30) {
             return;
         }
 
