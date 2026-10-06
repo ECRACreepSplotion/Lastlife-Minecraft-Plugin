@@ -3,6 +3,7 @@ package com.kodari.lastheart;
 import com.cryptomorin.xseries.XAttribute;
 import com.cryptomorin.xseries.XEnchantment;
 import com.cryptomorin.xseries.XMaterial;
+import com.cryptomorin.xseries.XPotion;
 import java.io.File;
 import java.io.IOException;
 import java.util.Map;
@@ -73,6 +74,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         getCommand("heartunban").setExecutor(this);
         getCommand("sethearts").setExecutor(this);
         getCommand("checkhearts").setExecutor(this);
+        Bukkit.getScheduler().runTaskTimer(this,
+                () -> Bukkit.getOnlinePlayers().forEach(this::refreshWardenLeggingsEffects), 0L, 20L);
     }
 
     @Override
@@ -333,6 +336,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             player.setHealth(maxHealth);
         } else if (player.getHealth() > maxHealth) {
             player.setHealth(maxHealth);
+        }
+        refreshWardenLeggingsEffects(player);
+    }
+
+    private void refreshWardenLeggingsEffects(Player player) {
+        if (isWardenLeggings(player.getInventory().getLeggings())) {
+            XPotion.matchXPotion("FIRE_RESISTANCE")
+                    .map(potion -> potion.buildPotionEffect(40, 0))
+                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+            XPotion.matchXPotion("REGENERATION")
+                    .map(potion -> potion.buildPotionEffect(40, 2))
+                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+        } else {
+            XPotion.matchXPotion("FIRE_RESISTANCE")
+                    .map(potion -> potion.buildPotionEffect(1, 0).getType())
+                    .ifPresent(player::removePotionEffect);
+            XPotion.matchXPotion("REGENERATION")
+                    .map(potion -> potion.buildPotionEffect(1, 2).getType())
+                    .ifPresent(player::removePotionEffect);
         }
     }
 
