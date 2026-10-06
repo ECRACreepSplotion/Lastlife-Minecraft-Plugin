@@ -8,8 +8,12 @@ import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -19,7 +23,7 @@ import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public final class LastHeartPlugin extends JavaPlugin implements Listener {
+public final class LastHeartPlugin extends JavaPlugin implements Listener, CommandExecutor {
     private static final int MAX_HEARTS = 10;
     private static final String BAN_REASON = "You lost all 10 hearts.";
 
@@ -39,6 +43,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener {
         }
         playerData = YamlConfiguration.loadConfiguration(playerDataFile);
         Bukkit.getPluginManager().registerEvents(this, this);
+        getCommand("heartunban").setExecutor(this);
+        getCommand("sethearts").setExecutor(this);
+        getCommand("checkhearts").setExecutor(this);
     }
 
     @Override
@@ -86,6 +93,103 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener {
                 applyMaxHealth(player, true);
             }
         });
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        switch (command.getName().toLowerCase()) {
+            case "heartunban" -> unbanPlayer(sender, args);
+            case "sethearts" -> setPlayerHearts(sender, args);
+            case "checkhearts" -> checkPlayerHearts(sender, args);
+            default -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void unbanPlayer(CommandSender sender, String[] args) {
+        if (args.length != 1) {
+            sender.sendMessage("Usage: /heartunban <player>");
+            return;
+        }
+
+        OfflinePlayer target = findPlayer(args[0]);
+        if (target == null) {
+            sender.sendMessage("That player has not played on this server.");
+            return;
+        }
+
+        UUID playerId = target.getUniqueId();
+        if (!isDeathBanned(playerId)) {
+            sender.sendMessage(target.getName() + " is not death-banned.");
+            return;
+        }
+
+        playerData.set(playerPath(playerId) + ".death-banned", false);
+        savePlayerData();
+        String playerName = target.getName() == null ? args[0] : target.getName();
+        Bukkit.getBanList(BanList.Type.NAME).pardon(playerName);
+        sender.sendMessage("Unbanned " + playerName + " from the death ban.");
+    }
+
+    private void setPlayerHearts(CommandSender sender, String[] args) {
+        if (args.length != 2) {
+            sender.sendMessage("Usage: /sethearts <player> <1-10>");
+            return;
+        }
+
+        OfflinePlayer target = findPlayer(args[0]);
+        if (target == null) {
+            sender.sendMessage("That player has not played on this server.");
+            return;
+        }
+
+        int hearts;
+        try {
+            hearts = Integer.parseInt(args[1]);
+        } catch (NumberFormatException exception) {
+            sender.sendMessage("Hearts must be a whole number from 1 to 10.");
+            return;
+        }
+        if (hearts < 1 || hearts > MAX_HEARTS) {
+            sender.sendMessage("Hearts must be from 1 to 10.");
+            return;
+        }
+
+        UUID playerId = target.getUniqueId();
+        playerData.set(playerPath(playerId) + ".hearts", hearts);
+        savePlayerData();
+        Player onlinePlayer = Bukkit.getPlayer(playerId);
+        if (onlinePlayer != null) {
+            applyMaxHealth(onlinePlayer, false);
+        }
+        sender.sendMessage("Set " + target.getName() + " to " + hearts + " heart(s).");
+    }
+
+    private void checkPlayerHearts(CommandSender sender, String[] args) {
+        if (args.length != 1) {
+            sender.sendMessage("Usage: /checkhearts <player>");
+            return;
+        }
+
+        OfflinePlayer target = findPlayer(args[0]);
+        if (target == null) {
+            sender.sendMessage("That player has not played on this server.");
+            return;
+        }
+
+        sender.sendMessage(target.getName() + " has " + getHearts(target.getUniqueId()) + " heart(s).");
+    }
+
+    private OfflinePlayer findPlayer(String name) {
+        Player onlinePlayer = Bukkit.getPlayerExact(name);
+        if (onlinePlayer != null) {
+            return onlinePlayer;
+        }
+
+        OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(name);
+        return offlinePlayer.hasPlayedBefore() ? offlinePlayer : null;
     }
 
     private void applyMaxHealth(Player player, boolean restoreHealth) {

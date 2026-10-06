@@ -1,6 +1,29 @@
 name: LastLife
-version: 1.0.0
+version: 1.1.0
 main: com.kodari.lastheart.LastHeartPlugin
 api-version: '1.21'
 author: CreepSplotion
 description: Players gain a heart after every death, up to ten hearts.
+commands:
+  heartunban:
+    description: Removes a player's death ban.
+    usage: /heartunban <player>
+    permission: lastlife.unban
+  sethearts:
+    description: Sets a player's heart count.
+    usage: /sethearts <player> <1-10>
+    permission: lastlife.sethearts
+  checkhearts:
+    description: Checks a player's heart count.
+    usage: /checkhearts <player>
+    permission: lastlife.checkhearts
+permissions:
+  lastlife.unban:
+    description: Allows unbanning players death-banned at ten hearts.
+    default: op
+  lastlife.sethearts:
+    description: Allows setting a player's heart count.
+    default: op
+  lastlife.checkhearts:
+    description: Allows checking a player's heart count.
+    default: op
