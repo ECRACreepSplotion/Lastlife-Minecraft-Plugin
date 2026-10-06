@@ -4,32 +4,44 @@ import com.cryptomorin.xseries.XAttribute;
 import com.cryptomorin.xseries.XEnchantment;
 import com.cryptomorin.xseries.XMaterial;
 import com.cryptomorin.xseries.XPotion;
+import com.destroystokyo.paper.event.player.PlayerElytraBoostEvent;
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.io.File;
 import java.io.IOException;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.boss.BarColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.permissions.PermissionAttachment;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Evoker;
+import org.bukkit.entity.EnderCrystal;
+import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Warden;
 import org.bukkit.entity.Wither;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
+import org.bukkit.event.entity.EnderDragonChangePhaseEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -37,10 +49,13 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.RecipeChoice;
+import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -57,6 +72,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey wardenArmorKey;
     private NamespacedKey wardenLeggingsKey;
     private NamespacedKey witherBootsKey;
+    private NamespacedKey witherArmorKey;
+    private NamespacedKey demonicInitiatorKey;
+    private NamespacedKey empoweredDragonKey;
+    private NamespacedKey dragonArmorKey;
+    private NamespacedKey dragonChestplateKey;
+    private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
 
     @Override
     public void onEnable() {
@@ -68,12 +89,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         wardenArmorKey = new NamespacedKey(this, "warden_armor");
         wardenLeggingsKey = new NamespacedKey(this, "warden_leggings");
         witherBootsKey = new NamespacedKey(this, "wither_boots");
+        witherArmorKey = new NamespacedKey(this, "wither_armor");
+        demonicInitiatorKey = new NamespacedKey(this, "demonic_initiator");
+        empoweredDragonKey = new NamespacedKey(this, "empowered_dragon");
+        dragonArmorKey = new NamespacedKey(this, "dragon_armor");
+        dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
             throw new IllegalStateException("Could not create the plugin data folder");
         }
         playerData = YamlConfiguration.loadConfiguration(playerDataFile);
+        registerDemonicInitiatorRecipe();
         Bukkit.getPluginManager().registerEvents(this, this);
         getCommand("heartunban").setExecutor(this);
         getCommand("sethearts").setExecutor(this);
@@ -82,11 +109,19 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 () -> Bukkit.getOnlinePlayers().forEach(player -> {
                     refreshWardenLeggingsEffects(player);
                     refreshWitherBootsEffects(player);
+                    refreshDragonChestplateEffects(player);
+                    refreshLocatePermission(player);
                 }), 0L, 20L);
     }
 
     @Override
     public void onDisable() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            PermissionAttachment attachment = locatePermissionAttachments.remove(player.getUniqueId());
+            if (attachment != null) {
+                player.removeAttachment(attachment);
+            }
+        }
         if (playerData != null) {
             savePlayerData();
         }
@@ -102,6 +137,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         applyMaxHealth(event.getPlayer(), false);
+        refreshLocatePermission(event.getPlayer());
     }
 
     @EventHandler
@@ -190,6 +226,34 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     @EventHandler
+    public void onEnderDragonDeath(EntityDeathEvent event) {
+        if (!(event.getEntity() instanceof EnderDragon dragon)
+                || !isEmpoweredDragon(dragon)
+                || ThreadLocalRandom.current().nextDouble() >= 0.70) {
+            return;
+        }
+
+        double pieceRoll = ThreadLocalRandom.current().nextDouble();
+        if (pieceRoll < 0.30) {
+            event.getDrops().add(createDragonArmor("NETHERITE_BOOTS", "Boots", false));
+        } else if (pieceRoll < 0.60) {
+            event.getDrops().add(createDragonArmor("NETHERITE_HELMET", "Helmet", false));
+        } else if (pieceRoll < 0.90) {
+            event.getDrops().add(createDragonArmor("NETHERITE_LEGGINGS", "Leggings", false));
+        } else {
+            event.getDrops().add(createDragonArmor("NETHERITE_CHESTPLATE", "Chestplate", true));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEmpoweredDragonPhaseChange(EnderDragonChangePhaseEvent event) {
+        if (isEmpoweredDragon(event.getEntity())
+                && event.getNewPhase() == EnderDragon.Phase.LAND_ON_PORTAL) {
+            event.setNewPhase(EnderDragon.Phase.CIRCLING);
+        }
+    }
+
+    @EventHandler
     public void onWitherSpawn(CreatureSpawnEvent event) {
         if (!(event.getEntity() instanceof Wither wither)) {
             return;
@@ -224,6 +288,58 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         refreshMaxHealthNextTick(event.getPlayer());
+        if ((event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK)
+                || !isDemonicInitiator(event.getItem())) {
+            return;
+        }
+
+        event.setCancelled(true);
+        Player player = event.getPlayer();
+        if (!"THE_END".equals(player.getWorld().getEnvironment().name())) {
+            player.sendMessage(ChatColor.RED + "The Demonic Initiator can only be used in the End.");
+            return;
+        }
+
+        EnderDragon dragon = player.getWorld().getEntitiesByClass(EnderDragon.class).stream()
+                .filter(candidate -> !candidate.isDead() && candidate.getHealth() > 0.0)
+                .findFirst()
+                .orElse(null);
+        if (dragon == null) {
+            player.sendMessage(ChatColor.RED + "There is no living Ender Dragon to empower.");
+            return;
+        }
+        if (isEmpoweredDragon(dragon)) {
+            player.sendMessage(ChatColor.RED + "This Ender Dragon has already been empowered.");
+            return;
+        }
+
+        ItemStack initiator = event.getItem();
+        if (initiator.getAmount() <= 1) {
+            if (event.getHand() == EquipmentSlot.HAND) {
+                player.getInventory().setItemInMainHand(null);
+            } else {
+                player.getInventory().setItemInOffHand(null);
+            }
+        } else {
+            initiator.setAmount(initiator.getAmount() - 1);
+        }
+        empowerDragon(dragon);
+        player.sendMessage(ChatColor.DARK_PURPLE + "The Ender Dragon has been empowered!");
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerElytraBoost(PlayerElytraBoostEvent event) {
+        if (hasDragonChestplateInInventory(event.getPlayer())) {
+            event.setShouldConsume(false);
+        }
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        PermissionAttachment attachment = locatePermissionAttachments.remove(event.getPlayer().getUniqueId());
+        if (attachment != null) {
+            event.getPlayer().removeAttachment(attachment);
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -395,7 +511,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
 
         double maxHealth = getHearts(player.getUniqueId()) * 2.0
-                + (isWardenLeggings(player.getInventory().getLeggings()) ? 10.0 : 0.0);
+                + (isWardenLeggings(player.getInventory().getLeggings()) ? 10.0 : 0.0)
+                + (isDragonChestplate(player.getInventory().getChestplate()) ? 20.0 : 0.0);
         attribute.setBaseValue(maxHealth);
         if (restoreHealth) {
             player.setHealth(maxHealth);
@@ -403,6 +520,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             player.setHealth(maxHealth);
         }
         refreshWardenLeggingsEffects(player);
+        refreshDragonChestplateEffects(player);
     }
 
     private void refreshWardenLeggingsEffects(Player player) {
@@ -433,6 +551,155 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     .map(potion -> potion.buildPotionEffect(1, 2).getType())
                     .ifPresent(player::removePotionEffect);
         }
+    }
+
+    private void refreshDragonChestplateEffects(Player player) {
+        if (isDragonChestplate(player.getInventory().getChestplate())) {
+            XPotion.matchXPotion("RESISTANCE")
+                    .map(potion -> potion.buildPotionEffect(40, 2))
+                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+        } else {
+            XPotion.matchXPotion("RESISTANCE")
+                    .map(potion -> potion.buildPotionEffect(1, 2).getType())
+                    .ifPresent(player::removePotionEffect);
+        }
+    }
+
+    private void registerDemonicInitiatorRecipe() {
+        ShapedRecipe recipe = new ShapedRecipe(new NamespacedKey(this, "demonic_initiator"), createDemonicInitiator());
+        recipe.shape("DHD", "DCD", "DDD");
+        recipe.setIngredient('D', XMaterial.matchXMaterial("DRAGON_HEAD")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Dragon head is unavailable")));
+        recipe.setIngredient('H', new RecipeChoice.ExactChoice(
+                createWardenArmor("NETHERITE_HELMET", "Helmet", false)));
+        recipe.setIngredient('C', new RecipeChoice.ExactChoice(
+                createWitherArmor("NETHERITE_CHESTPLATE", "Chestplate", false)));
+        Bukkit.addRecipe(recipe);
+    }
+
+    private ItemStack createDemonicInitiator() {
+        ItemStack initiator = XMaterial.matchXMaterial("DRAGON_HEAD")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Dragon head is unavailable"));
+        ItemMeta meta = initiator.getItemMeta();
+        meta.setDisplayName(ChatColor.DARK_PURPLE + "Demonic Initiator");
+        meta.getPersistentDataContainer().set(demonicInitiatorKey, PersistentDataType.BYTE, (byte) 1);
+        XEnchantment.matchXEnchantment("UNBREAKING")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
+        initiator.setItemMeta(meta);
+        return initiator;
+    }
+
+    private void empowerDragon(EnderDragon dragon) {
+        dragon.getPersistentDataContainer().set(empoweredDragonKey, PersistentDataType.BYTE, (byte) 1);
+        AttributeInstance healthAttribute = dragon.getAttribute(maxHealthAttribute);
+        if (healthAttribute != null) {
+            healthAttribute.setBaseValue(healthAttribute.getBaseValue() * 10.0);
+            dragon.setHealth(healthAttribute.getValue());
+        }
+        dragon.getBossBar().setColor(BarColor.RED);
+        dragon.setPhase(EnderDragon.Phase.CIRCLING);
+        regenerateEndCrystals(dragon.getWorld());
+    }
+
+    private void regenerateEndCrystals(org.bukkit.World world) {
+        Set<Long> towerTops = new HashSet<>();
+        for (int x = -60; x <= 60; x++) {
+            for (int z = -60; z <= 60; z++) {
+                int distanceSquared = x * x + z * z;
+                if (distanceSquared < 625 || distanceSquared > 3600) {
+                    continue;
+                }
+                org.bukkit.block.Block highest = world.getHighestBlockAt(x, z);
+                if (highest.getY() >= 70 && "OBSIDIAN".equals(highest.getType().name())) {
+                    towerTops.add(packCoordinates(x, z));
+                }
+            }
+        }
+
+        while (!towerTops.isEmpty()) {
+            long start = towerTops.iterator().next();
+            ArrayDeque<Long> pending = new ArrayDeque<>();
+            pending.add(start);
+            towerTops.remove(start);
+            int count = 0;
+            int totalX = 0;
+            int totalY = 0;
+            int totalZ = 0;
+            while (!pending.isEmpty()) {
+                long packed = pending.removeFirst();
+                int x = unpackX(packed);
+                int z = unpackZ(packed);
+                count++;
+                totalX += x;
+                totalY += world.getHighestBlockAt(x, z).getY();
+                totalZ += z;
+                for (int offsetX = -1; offsetX <= 1; offsetX++) {
+                    for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                        long neighbor = packCoordinates(x + offsetX, z + offsetZ);
+                        if ((offsetX != 0 || offsetZ != 0) && towerTops.remove(neighbor)) {
+                            pending.addLast(neighbor);
+                        }
+                    }
+                }
+            }
+            if (count < 4 || count > 100) {
+                continue;
+            }
+
+            int centerX = (int) Math.round(totalX / (double) count);
+            int centerY = (int) Math.round(totalY / (double) count);
+            int centerZ = (int) Math.round(totalZ / (double) count);
+            Location crystalLocation = new Location(world, centerX + 0.5, centerY + 1.0, centerZ + 0.5);
+            boolean crystalExists = world.getNearbyEntities(crystalLocation, 4.0, 6.0, 4.0)
+                    .stream()
+                    .anyMatch(EnderCrystal.class::isInstance);
+            if (!crystalExists) {
+                world.spawn(crystalLocation, EnderCrystal.class, crystal -> crystal.setShowingBottom(false));
+            }
+        }
+    }
+
+    private long packCoordinates(int x, int z) {
+        return ((long) x << 32) | (z & 0xffffffffL);
+    }
+
+    private int unpackX(long packed) {
+        return (int) (packed >> 32);
+    }
+
+    private int unpackZ(long packed) {
+        return (int) packed;
+    }
+
+    private void refreshLocatePermission(Player player) {
+        UUID playerId = player.getUniqueId();
+        PermissionAttachment attachment = locatePermissionAttachments.get(playerId);
+        if (hasDragonChestplateInInventory(player)) {
+            if (attachment == null) {
+                attachment = player.addAttachment(this);
+                locatePermissionAttachments.put(playerId, attachment);
+            }
+            attachment.setPermission("minecraft.command.locate", true);
+        } else if (attachment != null) {
+            player.removeAttachment(attachment);
+            locatePermissionAttachments.remove(playerId);
+        }
+    }
+
+    private boolean hasDragonChestplateInInventory(Player player) {
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (isDragonChestplate(item)) {
+                return true;
+            }
+        }
+        for (ItemStack item : player.getInventory().getArmorContents()) {
+            if (isDragonChestplate(item)) {
+                return true;
+            }
+        }
+        return isDragonChestplate(player.getInventory().getItemInOffHand());
     }
 
     private ItemStack createEvolvedTotem() {
@@ -474,6 +741,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .orElseThrow(() -> new IllegalStateException(materialName + " is unavailable"));
         ItemMeta meta = armor.getItemMeta();
         meta.setDisplayName(ChatColor.GRAY + "The Wither's Netherite " + pieceName);
+        meta.getPersistentDataContainer().set(witherArmorKey, PersistentDataType.BYTE, (byte) 1);
         XEnchantment.matchXEnchantment("PROTECTION")
                 .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
         if (boots) {
@@ -486,6 +754,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             XEnchantment.matchXEnchantment("SOUL_SPEED")
                     .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
         }
+        armor.setItemMeta(meta);
+        return armor;
+    }
+
+    private ItemStack createDragonArmor(String materialName, String pieceName, boolean chestplate) {
+        ItemStack armor = XMaterial.matchXMaterial(materialName)
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException(materialName + " is unavailable"));
+        ItemMeta meta = armor.getItemMeta();
+        meta.setDisplayName(ChatColor.DARK_PURPLE + "The Ender Dragon's Netherite " + pieceName);
+        meta.getPersistentDataContainer().set(dragonArmorKey, PersistentDataType.BYTE, (byte) 1);
+        if (chestplate) {
+            meta.getPersistentDataContainer().set(dragonChestplateKey, PersistentDataType.BYTE, (byte) 1);
+        }
+        XEnchantment.matchXEnchantment("PROTECTION")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
         armor.setItemMeta(meta);
         return armor;
     }
@@ -504,6 +788,26 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         return item.getItemMeta().getPersistentDataContainer()
                 .has(witherBootsKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isDragonChestplate(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(dragonChestplateKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isDemonicInitiator(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(demonicInitiatorKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isEmpoweredDragon(EnderDragon dragon) {
+        return dragon.getPersistentDataContainer().has(empoweredDragonKey, PersistentDataType.BYTE);
     }
 
     private void refreshMaxHealthNextTick(Player player) {
