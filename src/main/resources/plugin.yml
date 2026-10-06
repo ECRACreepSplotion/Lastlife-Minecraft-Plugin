@@ -1,0 +1,6 @@
+name: LastLife
+version: 1.0.0
+main: com.kodari.lastheart.LastHeartPlugin
+api-version: '1.21'
+author: CreepSplotion
+description: Players gain a heart after every death, up to ten hearts.
