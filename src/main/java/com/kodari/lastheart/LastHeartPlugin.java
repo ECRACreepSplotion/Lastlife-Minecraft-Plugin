@@ -22,12 +22,16 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Evoker;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Warden;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
@@ -47,6 +51,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private Attribute maxHealthAttribute;
     private NamespacedKey evolvedTotemKey;
     private NamespacedKey evolvedTotemUsesKey;
+    private NamespacedKey wardenArmorKey;
+    private NamespacedKey wardenLeggingsKey;
 
     @Override
     public void onEnable() {
@@ -55,6 +61,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .orElseThrow(() -> new IllegalStateException("Could not find the max health attribute"));
         evolvedTotemKey = new NamespacedKey(this, "evolved_totem");
         evolvedTotemUsesKey = new NamespacedKey(this, "evolved_totem_uses");
+        wardenArmorKey = new NamespacedKey(this, "warden_armor");
+        wardenLeggingsKey = new NamespacedKey(this, "warden_leggings");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -110,6 +118,44 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 && ThreadLocalRandom.current().nextDouble() < 0.10) {
             event.getDrops().add(createEvolvedTotem());
         }
+    }
+
+    @EventHandler
+    public void onWardenDeath(EntityDeathEvent event) {
+        if (!(event.getEntity() instanceof Warden)
+                || ThreadLocalRandom.current().nextDouble() >= 0.05) {
+            return;
+        }
+
+        double pieceRoll = ThreadLocalRandom.current().nextDouble();
+        if (pieceRoll < 0.45) {
+            event.getDrops().add(createWardenArmor("NETHERITE_BOOTS", "Boots", false));
+        } else if (pieceRoll < 0.75) {
+            event.getDrops().add(createWardenArmor("NETHERITE_HELMET", "Helmet", false));
+        } else if (pieceRoll < 0.92) {
+            event.getDrops().add(createWardenArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
+        } else {
+            event.getDrops().add(createWardenArmor("NETHERITE_LEGGINGS", "Leggings", true));
+        }
+    }
+
+    @EventHandler
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            refreshMaxHealthNextTick(player);
+        }
+    }
+
+    @EventHandler
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            refreshMaxHealthNextTick(player);
+        }
+    }
+
+    @EventHandler
+    public void onPlayerInteract(PlayerInteractEvent event) {
+        refreshMaxHealthNextTick(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -280,7 +326,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             return;
         }
 
-        double maxHealth = getHearts(player.getUniqueId()) * 2.0;
+        double maxHealth = getHearts(player.getUniqueId()) * 2.0
+                + (isWardenLeggings(player.getInventory().getLeggings()) ? 10.0 : 0.0);
         attribute.setBaseValue(maxHealth);
         if (restoreHealth) {
             player.setHealth(maxHealth);
@@ -301,6 +348,41 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
         totem.setItemMeta(meta);
         return totem;
+    }
+
+    private ItemStack createWardenArmor(String materialName, String pieceName, boolean leggings) {
+        ItemStack armor = XMaterial.matchXMaterial(materialName)
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException(materialName + " is unavailable"));
+        ItemMeta meta = armor.getItemMeta();
+        meta.setDisplayName(ChatColor.BLUE + "The Warden's Netherite " + pieceName);
+        meta.getPersistentDataContainer().set(wardenArmorKey, PersistentDataType.BYTE, (byte) 1);
+        XEnchantment.matchXEnchantment("PROTECTION")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+        if (leggings) {
+            meta.setUnbreakable(true);
+            meta.getPersistentDataContainer().set(wardenLeggingsKey, PersistentDataType.BYTE, (byte) 1);
+            XEnchantment.matchXEnchantment("SWIFT_SNEAK")
+                    .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+        }
+        armor.setItemMeta(meta);
+        return armor;
+    }
+
+    private boolean isWardenLeggings(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(wardenLeggingsKey, PersistentDataType.BYTE);
+    }
+
+    private void refreshMaxHealthNextTick(Player player) {
+        Bukkit.getScheduler().runTask(this, () -> {
+            if (player.isOnline()) {
+                applyMaxHealth(player, false);
+            }
+        });
     }
 
     private boolean isEvolvedTotem(ItemStack item) {
