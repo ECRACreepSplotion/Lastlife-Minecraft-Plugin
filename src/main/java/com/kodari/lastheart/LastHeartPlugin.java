@@ -6,14 +6,17 @@ import com.cryptomorin.xseries.XMaterial;
 import com.cryptomorin.xseries.XPotion;
 import com.destroystokyo.paper.event.player.PlayerElytraBoostEvent;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.io.File;
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -86,6 +89,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey elderGuardianArmorKey;
     private NamespacedKey elderGuardianHelmetKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
+    private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
 
     @Override
     public void onEnable() {
@@ -105,6 +109,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
         elderGuardianArmorKey = new NamespacedKey(this, "elder_guardian_armor");
         elderGuardianHelmetKey = new NamespacedKey(this, "elder_guardian_helmet");
+        registerCustomItemFactories();
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -567,8 +572,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void giveCustomItem(CommandSender sender, String[] args) {
-        if (args.length != 3) {
-            sender.sendMessage("Usage: /givecustom <player> <demonicinitiator|elderguardianhelmet> <amount>");
+        if (args.length < 3) {
+            sender.sendMessage("Usage: /givecustom <player> <item name> <amount>");
             return;
         }
 
@@ -580,7 +585,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         int amount;
         try {
-            amount = Integer.parseInt(args[2]);
+            amount = Integer.parseInt(args[args.length - 1]);
         } catch (NumberFormatException exception) {
             sender.sendMessage("Amount must be a positive whole number.");
             return;
@@ -590,22 +595,67 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             return;
         }
 
-        String itemName = args[1].replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
-        ItemStack item;
-        switch (itemName) {
-            case "demonicinitiator" -> item = createDemonicInitiator();
-            case "elderguardianhelmet", "theelderguardiansnetheritehelmet" ->
-                    item = createElderGuardianArmor("NETHERITE_HELMET", "Helmet", true);
-            default -> {
-                sender.sendMessage("Choose demonicinitiator or elderguardianhelmet.");
-                return;
-            }
+        String itemName = String.join(" ", Arrays.copyOfRange(args, 1, args.length - 1));
+        Supplier<ItemStack> itemFactory = customItemFactories.get(normalizeCustomItemName(itemName));
+        if (itemFactory == null) {
+            sender.sendMessage("Unknown custom item. Use the custom item's name.");
+            return;
         }
 
+        ItemStack item = itemFactory.get();
         item.setAmount(amount);
         target.getInventory().addItem(item).values().forEach(remaining ->
                 target.getWorld().dropItemNaturally(target.getLocation(), remaining));
         sender.sendMessage("Gave " + amount + " " + args[1] + " to " + target.getName() + ".");
+    }
+
+    private void registerCustomItemFactories() {
+        registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
+        registerCustomItem("V1 Evolved Totem", this::createEvolvedTotem, "evolvedtotem");
+        registerCustomItem("The Warden's Netherite Boots",
+                () -> createWardenArmor("NETHERITE_BOOTS", "Boots", false), "wardenboots");
+        registerCustomItem("The Warden's Netherite Helmet",
+                () -> createWardenArmor("NETHERITE_HELMET", "Helmet", false), "wardenhelmet");
+        registerCustomItem("The Warden's Netherite Chestplate",
+                () -> createWardenArmor("NETHERITE_CHESTPLATE", "Chestplate", false), "wardenchestplate");
+        registerCustomItem("The Warden's Netherite Leggings",
+                () -> createWardenArmor("NETHERITE_LEGGINGS", "Leggings", true), "wardenleggings");
+        registerCustomItem("The Wither's Netherite Boots",
+                () -> createWitherArmor("NETHERITE_BOOTS", "Boots", true), "witherboots");
+        registerCustomItem("The Wither's Netherite Helmet",
+                () -> createWitherArmor("NETHERITE_HELMET", "Helmet", false), "witherhelmet");
+        registerCustomItem("The Wither's Netherite Chestplate",
+                () -> createWitherArmor("NETHERITE_CHESTPLATE", "Chestplate", false), "witherchestplate");
+        registerCustomItem("The Wither's Netherite Leggings",
+                () -> createWitherArmor("NETHERITE_LEGGINGS", "Leggings", false), "witherleggings");
+        registerCustomItem("The Ender Dragon's Netherite Boots",
+                () -> createDragonArmor("NETHERITE_BOOTS", "Boots", false), "dragonboots");
+        registerCustomItem("The Ender Dragon's Netherite Helmet",
+                () -> createDragonArmor("NETHERITE_HELMET", "Helmet", false), "dragonhelmet");
+        registerCustomItem("The Ender Dragon's Netherite Leggings",
+                () -> createDragonArmor("NETHERITE_LEGGINGS", "Leggings", false), "dragonleggings");
+        registerCustomItem("The Ender Dragon's Netherite Chestplate",
+                () -> createDragonArmor("NETHERITE_CHESTPLATE", "Chestplate", true), "dragonchestplate");
+        registerCustomItem("The Elder Guardian's Netherite Boots",
+                () -> createElderGuardianArmor("NETHERITE_BOOTS", "Boots", false), "elderguardianboots");
+        registerCustomItem("The Elder Guardian's Netherite Leggings",
+                () -> createElderGuardianArmor("NETHERITE_LEGGINGS", "Leggings", false), "elderguardianleggings");
+        registerCustomItem("The Elder Guardian's Netherite Chestplate",
+                () -> createElderGuardianArmor("NETHERITE_CHESTPLATE", "Chestplate", false), "elderguardianchestplate");
+        registerCustomItem("The Elder Guardian's Netherite Helmet",
+                () -> createElderGuardianArmor("NETHERITE_HELMET", "Helmet", true),
+                "elderguardianhelmet");
+    }
+
+    private void registerCustomItem(String name, Supplier<ItemStack> factory, String... aliases) {
+        customItemFactories.put(normalizeCustomItemName(name), factory);
+        for (String alias : aliases) {
+            customItemFactories.put(normalizeCustomItemName(alias), factory);
+        }
+    }
+
+    private String normalizeCustomItemName(String name) {
+        return name.replaceAll("[^a-zA-Z0-9]", "").toLowerCase(Locale.ROOT);
     }
 
     private OfflinePlayer findPlayer(String name) {
