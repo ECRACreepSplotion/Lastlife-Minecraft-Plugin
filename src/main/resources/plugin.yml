@@ -1,5 +1,5 @@
 name: LastLife
-version: 4.0.1
+version: 4.1.0
 main: com.kodari.lastheart.LastHeartPlugin
 api-version: '1.21'
 author: CreepSplotion
@@ -17,6 +17,10 @@ commands:
     description: Checks a player's heart count.
     usage: /checkhearts <player>
     permission: lastlife.checkhearts
+  givecustom:
+    description: Gives a custom item to an online player.
+    usage: /givecustom <player> <demonicinitiator|elderguardianhelmet> <amount>
+    permission: lastlife.givecustom
 permissions:
   lastlife.unban:
     description: Allows unbanning players death-banned at ten hearts.
@@ -26,4 +30,7 @@ permissions:
     default: op
   lastlife.checkhearts:
     description: Allows checking a player's heart count.
+    default: op
+  lastlife.givecustom:
+    description: Allows giving custom items to players.
     default: op

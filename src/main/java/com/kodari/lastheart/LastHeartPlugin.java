@@ -116,6 +116,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         getCommand("heartunban").setExecutor(this);
         getCommand("sethearts").setExecutor(this);
         getCommand("checkhearts").setExecutor(this);
+        getCommand("givecustom").setExecutor(this);
         Bukkit.getScheduler().runTaskTimer(this,
                 () -> Bukkit.getOnlinePlayers().forEach(player -> {
                     refreshWardenLeggingsEffects(player);
@@ -483,6 +484,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             case "heartunban" -> unbanPlayer(sender, args);
             case "sethearts" -> setPlayerHearts(sender, args);
             case "checkhearts" -> checkPlayerHearts(sender, args);
+            case "givecustom" -> giveCustomItem(sender, args);
             default -> {
                 return false;
             }
@@ -562,6 +564,48 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
 
         sender.sendMessage(target.getName() + " has " + getHearts(target.getUniqueId()) + " heart(s).");
+    }
+
+    private void giveCustomItem(CommandSender sender, String[] args) {
+        if (args.length != 3) {
+            sender.sendMessage("Usage: /givecustom <player> <demonicinitiator|elderguardianhelmet> <amount>");
+            return;
+        }
+
+        Player target = Bukkit.getPlayerExact(args[0]);
+        if (target == null) {
+            sender.sendMessage("That player is not online.");
+            return;
+        }
+
+        int amount;
+        try {
+            amount = Integer.parseInt(args[2]);
+        } catch (NumberFormatException exception) {
+            sender.sendMessage("Amount must be a positive whole number.");
+            return;
+        }
+        if (amount < 1) {
+            sender.sendMessage("Amount must be a positive whole number.");
+            return;
+        }
+
+        String itemName = args[1].replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+        ItemStack item;
+        switch (itemName) {
+            case "demonicinitiator" -> item = createDemonicInitiator();
+            case "elderguardianhelmet", "theelderguardiansnetheritehelmet" ->
+                    item = createElderGuardianArmor("NETHERITE_HELMET", "Helmet", true);
+            default -> {
+                sender.sendMessage("Choose demonicinitiator or elderguardianhelmet.");
+                return;
+            }
+        }
+
+        item.setAmount(amount);
+        target.getInventory().addItem(item).values().forEach(remaining ->
+                target.getWorld().dropItemNaturally(target.getLocation(), remaining));
+        sender.sendMessage("Gave " + amount + " " + args[1] + " to " + target.getName() + ".");
     }
 
     private OfflinePlayer findPlayer(String name) {
