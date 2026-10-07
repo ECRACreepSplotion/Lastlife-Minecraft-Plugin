@@ -11,6 +11,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -90,6 +92,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey elderGuardianHelmetKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
+    private final List<String> customItemNames = new ArrayList<>();
 
     @Override
     public void onEnable() {
@@ -599,6 +602,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         Supplier<ItemStack> itemFactory = customItemFactories.get(normalizeCustomItemName(itemName));
         if (itemFactory == null) {
             sender.sendMessage("Unknown custom item. Use the custom item's name.");
+            sender.sendMessage("Available custom item names:");
+            for (String customItemName : customItemNames) {
+                sender.sendMessage(ChatColor.YELLOW + "- " + customItemName);
+            }
             return;
         }
 
@@ -648,6 +655,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void registerCustomItem(String name, Supplier<ItemStack> factory, String... aliases) {
+        customItemNames.add(name);
         customItemFactories.put(normalizeCustomItemName(name), factory);
         for (String alias : aliases) {
             customItemFactories.put(normalizeCustomItemName(alias), factory);
