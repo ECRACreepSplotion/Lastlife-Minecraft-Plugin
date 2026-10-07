@@ -645,7 +645,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     .map(potion -> potion.buildPotionEffect(40, 0))
                     .ifPresent(effect -> player.addPotionEffect(effect, true));
             XPotion.matchXPotion("HASTE")
-                    .map(potion -> potion.buildPotionEffect(40, 1))
+                    .map(potion -> potion.buildPotionEffect(40, 3))
                     .ifPresent(effect -> player.addPotionEffect(effect, true));
         } else {
             XPotion.matchXPotion("WEAVING")
