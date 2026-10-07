@@ -32,6 +32,7 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Evoker;
 import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.ElderGuardian;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Warden;
 import org.bukkit.entity.Wither;
@@ -82,6 +83,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey empoweredDragonKey;
     private NamespacedKey dragonArmorKey;
     private NamespacedKey dragonChestplateKey;
+    private NamespacedKey elderGuardianArmorKey;
+    private NamespacedKey elderGuardianHelmetKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
 
     @Override
@@ -100,6 +103,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         empoweredDragonKey = new NamespacedKey(this, "empowered_dragon");
         dragonArmorKey = new NamespacedKey(this, "dragon_armor");
         dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
+        elderGuardianArmorKey = new NamespacedKey(this, "elder_guardian_armor");
+        elderGuardianHelmetKey = new NamespacedKey(this, "elder_guardian_helmet");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -116,6 +121,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshWardenLeggingsEffects(player);
                     refreshWitherBootsEffects(player);
                     refreshDragonChestplateEffects(player);
+                    refreshElderGuardianHelmetEffects(player);
                     refreshLocatePermission(player);
                 }), 0L, 20L);
     }
@@ -188,6 +194,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             event.getDrops().add(createWardenArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
         } else {
             event.getDrops().add(createWardenArmor("NETHERITE_LEGGINGS", "Leggings", true));
+        }
+    }
+
+    @EventHandler
+    public void onElderGuardianDeath(EntityDeathEvent event) {
+        if (!(event.getEntity() instanceof ElderGuardian)
+                || ThreadLocalRandom.current().nextDouble() >= 0.25) {
+            return;
+        }
+
+        double pieceRoll = ThreadLocalRandom.current().nextDouble();
+        if (pieceRoll < 0.50) {
+            event.getDrops().add(createElderGuardianArmor("NETHERITE_BOOTS", "Boots", false));
+        } else if (pieceRoll < 0.80) {
+            event.getDrops().add(createElderGuardianArmor("NETHERITE_LEGGINGS", "Leggings", false));
+        } else if (pieceRoll < 0.95) {
+            event.getDrops().add(createElderGuardianArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
+        } else {
+            event.getDrops().add(createElderGuardianArmor("NETHERITE_HELMET", "Helmet", true));
         }
     }
 
@@ -284,6 +309,19 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (healthAttribute != null) {
             healthAttribute.setBaseValue(healthAttribute.getBaseValue() * multiplier);
             wither.setHealth(healthAttribute.getValue());
+        }
+    }
+
+    @EventHandler
+    public void onElderGuardianSpawn(CreatureSpawnEvent event) {
+        if (!(event.getEntity() instanceof ElderGuardian elderGuardian)) {
+            return;
+        }
+
+        AttributeInstance healthAttribute = elderGuardian.getAttribute(maxHealthAttribute);
+        if (healthAttribute != null) {
+            healthAttribute.setBaseValue(healthAttribute.getBaseValue() * 3.0);
+            elderGuardian.setHealth(healthAttribute.getValue());
         }
     }
 
@@ -598,6 +636,30 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
     }
 
+    private void refreshElderGuardianHelmetEffects(Player player) {
+        if (isElderGuardianHelmet(player.getInventory().getHelmet())) {
+            XPotion.matchXPotion("WEAVING")
+                    .map(potion -> potion.buildPotionEffect(40, 5))
+                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+            XPotion.matchXPotion("NIGHT_VISION")
+                    .map(potion -> potion.buildPotionEffect(40, 0))
+                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+            XPotion.matchXPotion("HASTE")
+                    .map(potion -> potion.buildPotionEffect(40, 1))
+                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+        } else {
+            XPotion.matchXPotion("WEAVING")
+                    .map(potion -> potion.buildPotionEffect(1, 5).getType())
+                    .ifPresent(player::removePotionEffect);
+            XPotion.matchXPotion("NIGHT_VISION")
+                    .map(potion -> potion.buildPotionEffect(1, 0).getType())
+                    .ifPresent(player::removePotionEffect);
+            XPotion.matchXPotion("HASTE")
+                    .map(potion -> potion.buildPotionEffect(1, 1).getType())
+                    .ifPresent(player::removePotionEffect);
+        }
+    }
+
     private void registerDemonicInitiatorRecipe() {
         Bukkit.removeRecipe(demonicInitiatorRecipeKey);
         ShapedRecipe recipe = new ShapedRecipe(demonicInitiatorRecipeKey, createDemonicInitiator());
@@ -841,6 +903,29 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return armor;
     }
 
+    private ItemStack createElderGuardianArmor(String materialName, String pieceName, boolean helmet) {
+        ItemStack armor = XMaterial.matchXMaterial(materialName)
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException(materialName + " is unavailable"));
+        ItemMeta meta = armor.getItemMeta();
+        meta.setDisplayName(ChatColor.GREEN + "The Elder Guardian's Netherite " + pieceName);
+        meta.getPersistentDataContainer().set(elderGuardianArmorKey, PersistentDataType.BYTE, (byte) 1);
+        XEnchantment.matchXEnchantment("PROTECTION")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+        if (helmet) {
+            meta.setUnbreakable(true);
+            meta.getPersistentDataContainer().set(elderGuardianHelmetKey, PersistentDataType.BYTE, (byte) 1);
+            XEnchantment.matchXEnchantment("THORNS")
+                    .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+            XEnchantment.matchXEnchantment("RESPIRATION")
+                    .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 6, true));
+            XEnchantment.matchXEnchantment("AQUA_AFFINITY")
+                    .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
+        }
+        armor.setItemMeta(meta);
+        return armor;
+    }
+
     private boolean isWardenLeggings(ItemStack item) {
         if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
             return false;
@@ -863,6 +948,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         return item.getItemMeta().getPersistentDataContainer()
                 .has(dragonChestplateKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isElderGuardianHelmet(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(elderGuardianHelmetKey, PersistentDataType.BYTE);
     }
 
     private boolean isDemonicInitiator(ItemStack item) {
