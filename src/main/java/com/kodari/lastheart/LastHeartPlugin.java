@@ -23,6 +23,7 @@ import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
@@ -76,6 +77,7 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapedRecipe;
+import org.bukkit.inventory.SmithingTransformRecipe;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.Keyed;
 import org.bukkit.persistence.PersistentDataType;
@@ -105,6 +107,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
     private NamespacedKey soulTableKey;
+    private NamespacedKey soulTableRecipeKey;
     private NamespacedKey soulMaceKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
@@ -132,6 +135,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         soulTableKey = new NamespacedKey(this, "soul_table");
+        soulTableRecipeKey = new NamespacedKey(this, "soul_table_recipe");
         soulMaceKey = new NamespacedKey(this, "soul_mace");
         registerCustomItemFactories();
 
@@ -142,6 +146,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         playerData = YamlConfiguration.loadConfiguration(playerDataFile);
         registerDemonicInitiatorRecipe();
         registerHeartRemoverRecipe();
+        registerSoulTableRecipe();
         Bukkit.getPluginManager().registerEvents(this, this);
         getCommand("heartunban").setExecutor(this);
         getCommand("sethearts").setExecutor(this);
@@ -1006,6 +1011,26 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         recipe.setIngredient('C', XMaterial.matchXMaterial("HEAVY_CORE")
                 .map(XMaterial::parseMaterial)
                 .orElseThrow(() -> new IllegalStateException("Heavy core is unavailable")));
+        Bukkit.addRecipe(recipe);
+    }
+
+    private void registerSoulTableRecipe() {
+        Bukkit.removeRecipe(soulTableRecipeKey);
+        Material trimTemplate = XMaterial.matchXMaterial("SILENCE_ARMOR_TRIM_SMITHING_TEMPLATE")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Silence armor trim template is unavailable"));
+        Material craftingTable = XMaterial.matchXMaterial("CRAFTING_TABLE")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Crafting table is unavailable"));
+        Material netheriteIngot = XMaterial.matchXMaterial("NETHERITE_INGOT")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Netherite ingot is unavailable"));
+        SmithingTransformRecipe recipe = new SmithingTransformRecipe(
+                soulTableRecipeKey,
+                createSoulTable(),
+                new RecipeChoice.MaterialChoice(trimTemplate),
+                new RecipeChoice.MaterialChoice(craftingTable),
+                new RecipeChoice.MaterialChoice(netheriteIngot));
         Bukkit.addRecipe(recipe);
     }
 
