@@ -26,7 +26,9 @@ import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.boss.BarColor;
+import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -38,6 +40,7 @@ import org.bukkit.entity.Evoker;
 import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.ElderGuardian;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Warden;
 import org.bukkit.entity.Wither;
@@ -45,13 +48,17 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EnderDragonChangePhaseEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -61,6 +68,9 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.world.LootGenerateEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.EquipmentSlotGroup;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.Recipe;
@@ -94,6 +104,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulFragmentKey;
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
+    private NamespacedKey soulTableKey;
+    private NamespacedKey soulMaceKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
     private final List<String> customItemNames = new ArrayList<>();
@@ -119,6 +131,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulFragmentKey = new NamespacedKey(this, "soul_fragment");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
+        soulTableKey = new NamespacedKey(this, "soul_table");
+        soulMaceKey = new NamespacedKey(this, "soul_mace");
         registerCustomItemFactories();
 
         playerDataFile = new File(getDataFolder(), "players.yml");
@@ -374,7 +388,86 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     @EventHandler
+    public void onSoulTablePlace(BlockPlaceEvent event) {
+        if (!isSoulTable(event.getItemInHand())) {
+            return;
+        }
+
+        List<String> soulTables = playerData.getStringList("soul-tables");
+        String locationKey = soulTableLocationKey(event.getBlockPlaced());
+        if (!soulTables.contains(locationKey)) {
+            soulTables.add(locationKey);
+            playerData.set("soul-tables", soulTables);
+            savePlayerData();
+        }
+    }
+
+    @EventHandler
+    public void onSoulTableBreak(BlockBreakEvent event) {
+        List<String> soulTables = playerData.getStringList("soul-tables");
+        if (!soulTables.remove(soulTableLocationKey(event.getBlock()))) {
+            return;
+        }
+
+        playerData.set("soul-tables", soulTables);
+        savePlayerData();
+        event.setDropItems(false);
+        if (event.getPlayer().getGameMode() != org.bukkit.GameMode.CREATIVE) {
+            Map<Integer, ItemStack> overflow = event.getPlayer().getInventory().addItem(createSoulTable());
+            overflow.values().forEach(item -> event.getBlock().getWorld()
+                    .dropItemNaturally(event.getBlock().getLocation(), item));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSoulMaceDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player player)
+                || !(event.getEntity() instanceof LivingEntity)
+                || !isSoulMace(player.getInventory().getItemInMainHand())) {
+            return;
+        }
+
+        double healing = event.getFinalDamage() / 3.0;
+        if (healing <= 0.0) {
+            return;
+        }
+        Bukkit.getScheduler().runTask(this, () -> {
+            if (player.isOnline() && !player.isDead()) {
+                AttributeInstance healthAttribute = player.getAttribute(maxHealthAttribute);
+                if (healthAttribute != null) {
+                    player.setHealth(Math.min(healthAttribute.getValue(), player.getHealth() + healing));
+                }
+            }
+        });
+    }
+
+    @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getView().getTopInventory().getHolder() instanceof SoulTableHolder holder) {
+            if (event.getRawSlot() >= event.getView().getTopInventory().getSize()) {
+                if (event.isShiftClick()) {
+                    event.setCancelled(true);
+                }
+                return;
+            }
+
+            event.setCancelled(true);
+            if (!(event.getWhoClicked() instanceof Player player)) {
+                return;
+            }
+            if (event.getRawSlot() == 49) {
+                holder.transitioning = true;
+                openSoulTable(player, holder.grid, 1 - holder.page);
+            } else if (event.getRawSlot() == 53) {
+                craftSoulMace(player, holder);
+            } else {
+                int gridSlot = holder.gridSlot(event.getRawSlot());
+                if (gridSlot >= 0 && (event.isLeftClick() || event.isRightClick())) {
+                    moveSoulTableItem(player, holder, gridSlot, event.isRightClick());
+                }
+            }
+            return;
+        }
         if (event.getWhoClicked() instanceof Player player) {
             refreshMaxHealthNextTick(player);
         }
@@ -382,8 +475,35 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getView().getTopInventory().getHolder() instanceof SoulTableHolder) {
+            if (event.getRawSlots().stream().anyMatch(slot -> slot < event.getView().getTopInventory().getSize())) {
+                event.setCancelled(true);
+            }
+            return;
+        }
         if (event.getWhoClicked() instanceof Player player) {
             refreshMaxHealthNextTick(player);
+        }
+    }
+
+    @EventHandler
+    public void onSoulTableClose(InventoryCloseEvent event) {
+        if (!(event.getView().getTopInventory().getHolder() instanceof SoulTableHolder holder)
+                || holder.transitioning
+                || !(event.getPlayer() instanceof Player player)) {
+            return;
+        }
+
+        syncSoulTablePage(holder);
+        for (int slot = 0; slot < holder.grid.length; slot++) {
+            ItemStack item = holder.grid[slot];
+            if (isEmpty(item)) {
+                continue;
+            }
+            Map<Integer, ItemStack> overflow = player.getInventory().addItem(item);
+            overflow.values().forEach(overflowItem -> player.getWorld()
+                    .dropItemNaturally(player.getLocation(), overflowItem));
+            holder.grid[slot] = null;
         }
     }
 
@@ -424,6 +544,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         refreshMaxHealthNextTick(event.getPlayer());
+        if (event.getHand() == EquipmentSlot.HAND
+                && event.getAction() == Action.RIGHT_CLICK_BLOCK
+                && event.getClickedBlock() != null
+                && isSoulTableLocation(event.getClickedBlock())) {
+            event.setCancelled(true);
+            openSoulTable(event.getPlayer(), new ItemStack[81], 0);
+            return;
+        }
         if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
                 && isHeartRemover(event.getItem())) {
             event.setCancelled(true);
@@ -708,6 +836,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
         registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
+        registerCustomItem("Soul Table", this::createSoulTable, "soultable");
+        registerCustomItem("Soul Mace", this::createSoulMace, "soulmace");
         registerCustomItem("V1 Evolved Totem", this::createEvolvedTotem, "evolvedtotem");
         registerCustomItem("The Warden's Netherite Boots",
                 () -> createWardenArmor("NETHERITE_BOOTS", "Boots", false), "wardenboots");
@@ -899,6 +1029,149 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return true;
     }
 
+    private void openSoulTable(Player player, ItemStack[] grid, int page) {
+        SoulTableHolder holder = new SoulTableHolder(grid, page);
+        holder.inventory = Bukkit.createInventory(holder, 54,
+                ChatColor.BLUE + "Soul Table - Page " + (page + 1) + "/2");
+        renderSoulTable(holder);
+        player.openInventory(holder.inventory);
+    }
+
+    private void renderSoulTable(SoulTableHolder holder) {
+        for (int slot = 0; slot < holder.inventory.getSize(); slot++) {
+            int gridSlot = holder.gridSlot(slot);
+            if (gridSlot >= 0) {
+                holder.inventory.setItem(slot, holder.grid[gridSlot]);
+            } else if (slot >= 45) {
+                holder.inventory.setItem(slot, createSoulTableButton("GRAY_STAINED_GLASS_PANE", " "));
+            }
+        }
+
+        holder.inventory.setItem(49, createSoulTableButton("ARROW",
+                holder.page == 0 ? ChatColor.AQUA + "View rows 6-9" : ChatColor.AQUA + "View rows 1-5"));
+        if (isSoulMaceRecipe(holder.grid)) {
+            holder.inventory.setItem(53, createSoulMace());
+        } else {
+            holder.inventory.setItem(53, createSoulTableButton("BARRIER",
+                    ChatColor.RED + "Complete the 9x9 recipe"));
+        }
+    }
+
+    private ItemStack createSoulTableButton(String materialName, String displayName) {
+        ItemStack button = XMaterial.matchXMaterial(materialName)
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException(materialName + " is unavailable"));
+        ItemMeta meta = button.getItemMeta();
+        meta.setDisplayName(displayName);
+        button.setItemMeta(meta);
+        return button;
+    }
+
+    private void moveSoulTableItem(Player player, SoulTableHolder holder, int gridSlot, boolean rightClick) {
+        ItemStack cursor = player.getItemOnCursor();
+        ItemStack stored = holder.grid[gridSlot];
+        cursor = isEmpty(cursor) ? null : cursor.clone();
+        stored = isEmpty(stored) ? null : stored.clone();
+
+        if (cursor == null && stored != null) {
+            int amount = rightClick ? (stored.getAmount() + 1) / 2 : stored.getAmount();
+            ItemStack taken = stored.clone();
+            taken.setAmount(amount);
+            stored.setAmount(stored.getAmount() - amount);
+            player.setItemOnCursor(taken);
+            holder.grid[gridSlot] = isEmpty(stored) ? null : stored;
+        } else if (cursor != null && stored == null) {
+            if (rightClick) {
+                ItemStack placed = cursor.clone();
+                placed.setAmount(1);
+                cursor.setAmount(cursor.getAmount() - 1);
+                holder.grid[gridSlot] = placed;
+                player.setItemOnCursor(isEmpty(cursor) ? null : cursor);
+            } else {
+                holder.grid[gridSlot] = cursor;
+                player.setItemOnCursor(null);
+            }
+        } else if (cursor != null && stored != null && stored.isSimilar(cursor)) {
+            int maxAmount = Math.min(stored.getMaxStackSize(), cursor.getMaxStackSize());
+            int moved = Math.min(rightClick ? 1 : cursor.getAmount(), maxAmount - stored.getAmount());
+            if (moved > 0) {
+                stored.setAmount(stored.getAmount() + moved);
+                cursor.setAmount(cursor.getAmount() - moved);
+                holder.grid[gridSlot] = stored;
+                player.setItemOnCursor(isEmpty(cursor) ? null : cursor);
+            }
+        } else if (!rightClick) {
+            holder.grid[gridSlot] = cursor;
+            player.setItemOnCursor(stored);
+        }
+
+        renderSoulTable(holder);
+    }
+
+    private void syncSoulTablePage(SoulTableHolder holder) {
+        for (int slot = 0; slot < holder.inventory.getSize(); slot++) {
+            int gridSlot = holder.gridSlot(slot);
+            if (gridSlot >= 0) {
+                holder.grid[gridSlot] = holder.inventory.getItem(slot);
+            }
+        }
+    }
+
+    private void craftSoulMace(Player player, SoulTableHolder holder) {
+        if (!isSoulMaceRecipe(holder.grid)) {
+            player.sendMessage(ChatColor.RED + "The Soul Mace recipe is incomplete.");
+            return;
+        }
+
+        for (int slot = 0; slot < holder.grid.length; slot++) {
+            ItemStack ingredient = holder.grid[slot];
+            ingredient.setAmount(ingredient.getAmount() - 1);
+            if (ingredient.getAmount() <= 0) {
+                holder.grid[slot] = null;
+            }
+        }
+
+        Map<Integer, ItemStack> overflow = player.getInventory().addItem(createSoulMace());
+        overflow.values().forEach(item -> player.getWorld()
+                .dropItemNaturally(player.getLocation(), item));
+        renderSoulTable(holder);
+    }
+
+    private boolean isSoulMaceRecipe(ItemStack[] grid) {
+        if (grid.length != 81) {
+            return false;
+        }
+        for (int slot = 0; slot < grid.length; slot++) {
+            int row = slot / 9;
+            int column = slot % 9;
+            ItemStack ingredient = grid[slot];
+            if (row >= 3 && row <= 5 && column >= 3 && column <= 5) {
+                if (isEmpty(ingredient)
+                        || !"MACE".equals(ingredient.getType().name())
+                        || isSoulMace(ingredient)) {
+                    return false;
+                }
+            } else if (!isSoulFragment(ingredient)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isEmpty(ItemStack item) {
+        return item == null || item.getType().isAir() || item.getAmount() <= 0;
+    }
+
+    private String soulTableLocationKey(Block block) {
+        Location location = block.getLocation();
+        return location.getWorld().getUID() + ";" + location.getBlockX()
+                + ";" + location.getBlockY() + ";" + location.getBlockZ();
+    }
+
+    private boolean isSoulTableLocation(Block block) {
+        return playerData.getStringList("soul-tables").contains(soulTableLocationKey(block));
+    }
+
     private ItemStack createDemonicInitiator() {
         ItemStack initiator = XMaterial.matchXMaterial("SKELETON_SKULL")
                 .map(XMaterial::parseItem)
@@ -921,6 +1194,36 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         meta.getPersistentDataContainer().set(soulFragmentKey, PersistentDataType.BYTE, (byte) 1);
         fragment.setItemMeta(meta);
         return fragment;
+    }
+
+    private ItemStack createSoulTable() {
+        ItemStack table = XMaterial.matchXMaterial("CRAFTING_TABLE")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Crafting table is unavailable"));
+        ItemMeta meta = table.getItemMeta();
+        meta.setDisplayName(ChatColor.BLUE + "Soul Table");
+        meta.setItemModel(new NamespacedKey(this, "soul_table"));
+        meta.getPersistentDataContainer().set(soulTableKey, PersistentDataType.BYTE, (byte) 1);
+        table.setItemMeta(meta);
+        return table;
+    }
+
+    private ItemStack createSoulMace() {
+        ItemStack mace = XMaterial.matchXMaterial("MACE")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Mace is unavailable"));
+        ItemMeta meta = mace.getItemMeta();
+        meta.setDisplayName(ChatColor.DARK_PURPLE + "Soul Mace");
+        meta.setLore(List.of(ChatColor.GRAY + "Heals 1 heart per 3 hearts of damage dealt."));
+        meta.getPersistentDataContainer().set(soulMaceKey, PersistentDataType.BYTE, (byte) 1);
+        Attribute attackDamage = XAttribute.of("attack_damage")
+                .map(XAttribute::get)
+                .orElseThrow(() -> new IllegalStateException("Attack damage attribute is unavailable"));
+        meta.addAttributeModifier(attackDamage, new AttributeModifier(
+                new NamespacedKey(this, "soul_mace_bonus"), 4.0,
+                AttributeModifier.Operation.ADD_NUMBER, EquipmentSlotGroup.HAND));
+        mace.setItemMeta(meta);
+        return mace;
     }
 
     private ItemStack createHeartRemover() {
@@ -1214,6 +1517,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .has(soulFragmentKey, PersistentDataType.BYTE);
     }
 
+    private boolean isSoulTable(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(soulTableKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isSoulMace(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(soulMaceKey, PersistentDataType.BYTE);
+    }
+
     private boolean isHeartRemover(ItemStack item) {
         if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
             return false;
@@ -1272,6 +1591,33 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             playerData.save(playerDataFile);
         } catch (IOException exception) {
             getLogger().severe("Could not save player data: " + exception.getMessage());
+        }
+    }
+
+    private final class SoulTableHolder implements InventoryHolder {
+        private final ItemStack[] grid;
+        private final int page;
+        private Inventory inventory;
+        private boolean transitioning;
+
+        private SoulTableHolder(ItemStack[] grid, int page) {
+            this.grid = grid;
+            this.page = page;
+        }
+
+        private int gridSlot(int inventorySlot) {
+            if (page == 0 && inventorySlot >= 0 && inventorySlot < 45) {
+                return inventorySlot;
+            }
+            if (page == 1 && inventorySlot >= 0 && inventorySlot < 36) {
+                return inventorySlot + 45;
+            }
+            return -1;
+        }
+
+        @Override
+        public Inventory getInventory() {
+            return inventory;
         }
     }
 }
