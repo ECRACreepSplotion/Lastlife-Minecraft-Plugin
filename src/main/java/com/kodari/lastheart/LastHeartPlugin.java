@@ -59,6 +59,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.world.LootGenerateEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
@@ -90,6 +91,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey dragonChestplateKey;
     private NamespacedKey elderGuardianArmorKey;
     private NamespacedKey elderGuardianHelmetKey;
+    private NamespacedKey soulFragmentKey;
+    private NamespacedKey heartRemoverKey;
+    private NamespacedKey heartRemoverRecipeKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
     private final List<String> customItemNames = new ArrayList<>();
@@ -112,6 +116,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
         elderGuardianArmorKey = new NamespacedKey(this, "elder_guardian_armor");
         elderGuardianHelmetKey = new NamespacedKey(this, "elder_guardian_helmet");
+        soulFragmentKey = new NamespacedKey(this, "soul_fragment");
+        heartRemoverKey = new NamespacedKey(this, "heart_remover");
+        heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         registerCustomItemFactories();
 
         playerDataFile = new File(getDataFolder(), "players.yml");
@@ -120,6 +127,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         playerData = YamlConfiguration.loadConfiguration(playerDataFile);
         registerDemonicInitiatorRecipe();
+        registerHeartRemoverRecipe();
         Bukkit.getPluginManager().registerEvents(this, this);
         getCommand("heartunban").setExecutor(this);
         getCommand("sethearts").setExecutor(this);
@@ -223,6 +231,37 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         } else {
             event.getDrops().add(createElderGuardianArmor("NETHERITE_HELMET", "Helmet", true));
         }
+    }
+
+    @EventHandler
+    public void onStructureLootGenerate(LootGenerateEvent event) {
+        String lootTable = event.getLootTable().getKey().toString();
+        double chance = getSoulFragmentDropChance(lootTable);
+        if (chance > 0.0 && ThreadLocalRandom.current().nextDouble() < chance) {
+            event.getLoot().add(createSoulFragment());
+        }
+    }
+
+    private double getSoulFragmentDropChance(String lootTable) {
+        if ("minecraft:chests/buried_treasure".equals(lootTable)) {
+            return 0.85;
+        }
+        if (lootTable.startsWith("minecraft:chests/shipwreck_")) {
+            return 0.60;
+        }
+        if ("minecraft:chests/jungle_temple".equals(lootTable)) {
+            return 1.0;
+        }
+        if ("minecraft:chests/pillager_outpost".equals(lootTable)) {
+            return 0.45;
+        }
+        if ("minecraft:chests/desert_pyramid".equals(lootTable)) {
+            return 0.50;
+        }
+        if (lootTable.startsWith("minecraft:chests/village/")) {
+            return 0.25;
+        }
+        return 0.0;
     }
 
     @EventHandler
@@ -358,6 +397,15 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     @EventHandler
+    public void onPrepareHeartRemover(PrepareItemCraftEvent event) {
+        if (isHeartRemoverRecipe(event.getRecipe())) {
+            event.getInventory().setResult(isHeartRemoverRecipeInput(event.getInventory().getMatrix())
+                    ? createHeartRemover()
+                    : null);
+        }
+    }
+
+    @EventHandler
     public void onCraftDemonicInitiator(CraftItemEvent event) {
         if (isDemonicInitiatorRecipe(event.getRecipe())
                 && !isDemonicInitiatorRecipeInput(event.getInventory().getMatrix())) {
@@ -366,8 +414,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     @EventHandler
+    public void onCraftHeartRemover(CraftItemEvent event) {
+        if (isHeartRemoverRecipe(event.getRecipe())
+                && !isHeartRemoverRecipeInput(event.getInventory().getMatrix())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         refreshMaxHealthNextTick(event.getPlayer());
+        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
+                && isHeartRemover(event.getItem())) {
+            event.setCancelled(true);
+            consumeHeartRemover(event.getPlayer(), event.getHand());
+            return;
+        }
         if ((event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK)
                 || !isDemonicInitiator(event.getItem())) {
             return;
@@ -616,8 +678,36 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         sender.sendMessage("Gave " + amount + " " + args[1] + " to " + target.getName() + ".");
     }
 
+    private void consumeHeartRemover(Player player, EquipmentSlot hand) {
+        UUID playerId = player.getUniqueId();
+        int hearts = getHearts(playerId);
+        if (hearts <= 1) {
+            player.sendMessage(ChatColor.RED + "You need more than one heart to use the Heart Remover.");
+            return;
+        }
+
+        playerData.set(playerPath(playerId) + ".hearts", hearts - 1);
+        savePlayerData();
+        ItemStack item = hand == EquipmentSlot.HAND
+                ? player.getInventory().getItemInMainHand()
+                : player.getInventory().getItemInOffHand();
+        if (item.getAmount() <= 1) {
+            if (hand == EquipmentSlot.HAND) {
+                player.getInventory().setItemInMainHand(null);
+            } else {
+                player.getInventory().setItemInOffHand(null);
+            }
+        } else {
+            item.setAmount(item.getAmount() - 1);
+        }
+        applyMaxHealth(player, false);
+        player.sendMessage(ChatColor.RED + "You sacrificed one heart for an extra life. This cannot be undone.");
+    }
+
     private void registerCustomItemFactories() {
         registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
+        registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
+        registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("V1 Evolved Totem", this::createEvolvedTotem, "evolvedtotem");
         registerCustomItem("The Warden's Netherite Boots",
                 () -> createWardenArmor("NETHERITE_BOOTS", "Boots", false), "wardenboots");
@@ -778,6 +868,37 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         Bukkit.addRecipe(recipe);
     }
 
+    private void registerHeartRemoverRecipe() {
+        Bukkit.removeRecipe(heartRemoverRecipeKey);
+        ShapedRecipe recipe = new ShapedRecipe(heartRemoverRecipeKey, createHeartRemover());
+        recipe.shape("SSS", "SCS", "SSS");
+        recipe.setIngredient('S', new RecipeChoice.ExactChoice(createSoulFragment()));
+        recipe.setIngredient('C', XMaterial.matchXMaterial("HEAVY_CORE")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Heavy core is unavailable")));
+        Bukkit.addRecipe(recipe);
+    }
+
+    private boolean isHeartRemoverRecipe(Recipe recipe) {
+        return recipe instanceof Keyed keyed && heartRemoverRecipeKey.equals(keyed.getKey());
+    }
+
+    private boolean isHeartRemoverRecipeInput(ItemStack[] matrix) {
+        if (matrix.length != 9) {
+            return false;
+        }
+        for (int slot = 0; slot < matrix.length; slot++) {
+            if (slot == 4) {
+                if (matrix[slot] == null || !"HEAVY_CORE".equals(matrix[slot].getType().name())) {
+                    return false;
+                }
+            } else if (!isSoulFragment(matrix[slot])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private ItemStack createDemonicInitiator() {
         ItemStack initiator = XMaterial.matchXMaterial("SKELETON_SKULL")
                 .map(XMaterial::parseItem)
@@ -789,6 +910,31 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
         initiator.setItemMeta(meta);
         return initiator;
+    }
+
+    private ItemStack createSoulFragment() {
+        ItemStack fragment = XMaterial.matchXMaterial("WITHER_ROSE")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Wither rose is unavailable"));
+        ItemMeta meta = fragment.getItemMeta();
+        meta.setDisplayName(ChatColor.DARK_PURPLE + "Soul Fragment");
+        meta.getPersistentDataContainer().set(soulFragmentKey, PersistentDataType.BYTE, (byte) 1);
+        fragment.setItemMeta(meta);
+        return fragment;
+    }
+
+    private ItemStack createHeartRemover() {
+        ItemStack heartRemover = XMaterial.matchXMaterial("WITHER_SKELETON_SKULL")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Wither skeleton skull is unavailable"));
+        ItemMeta meta = heartRemover.getItemMeta();
+        meta.setDisplayName(ChatColor.RED + "Heart Remover");
+        meta.setLore(Arrays.asList(
+                ChatColor.GRAY + "Sacrifices one heart for an extra life.",
+                ChatColor.DARK_RED + "This action cannot be undone."));
+        meta.getPersistentDataContainer().set(heartRemoverKey, PersistentDataType.BYTE, (byte) 1);
+        heartRemover.setItemMeta(meta);
+        return heartRemover;
     }
 
     private boolean isDemonicInitiatorRecipe(Recipe recipe) {
@@ -1058,6 +1204,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         return item.getItemMeta().getPersistentDataContainer()
                 .has(elderGuardianHelmetKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isSoulFragment(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(soulFragmentKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isHeartRemover(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(heartRemoverKey, PersistentDataType.BYTE);
     }
 
     private boolean isDemonicInitiator(ItemStack item) {
