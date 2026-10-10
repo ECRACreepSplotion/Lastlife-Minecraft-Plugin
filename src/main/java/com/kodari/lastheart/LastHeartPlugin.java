@@ -929,17 +929,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isWardenLeggings(player.getInventory().getLeggings())) {
             XPotion.matchXPotion("FIRE_RESISTANCE")
                     .map(potion -> potion.buildPotionEffect(40, 0))
-                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
             XPotion.matchXPotion("REGENERATION")
                     .map(potion -> potion.buildPotionEffect(40, 2))
-                    .ifPresent(effect -> player.addPotionEffect(effect, true));
-        } else {
-            XPotion.matchXPotion("FIRE_RESISTANCE")
-                    .map(potion -> potion.buildPotionEffect(1, 0).getType())
-                    .ifPresent(player::removePotionEffect);
-            XPotion.matchXPotion("REGENERATION")
-                    .map(potion -> potion.buildPotionEffect(1, 2).getType())
-                    .ifPresent(player::removePotionEffect);
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
         }
     }
 
@@ -947,11 +940,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isWitherBoots(player.getInventory().getBoots())) {
             XPotion.matchXPotion("SPEED")
                     .map(potion -> potion.buildPotionEffect(40, 2))
-                    .ifPresent(effect -> player.addPotionEffect(effect, true));
-        } else {
-            XPotion.matchXPotion("SPEED")
-                    .map(potion -> potion.buildPotionEffect(1, 2).getType())
-                    .ifPresent(player::removePotionEffect);
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
         }
     }
 
@@ -959,11 +948,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isDragonChestplate(player.getInventory().getChestplate())) {
             XPotion.matchXPotion("RESISTANCE")
                     .map(potion -> potion.buildPotionEffect(40, 2))
-                    .ifPresent(effect -> player.addPotionEffect(effect, true));
-        } else {
-            XPotion.matchXPotion("RESISTANCE")
-                    .map(potion -> potion.buildPotionEffect(1, 2).getType())
-                    .ifPresent(player::removePotionEffect);
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
         }
     }
 
@@ -971,23 +956,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isElderGuardianHelmet(player.getInventory().getHelmet())) {
             XPotion.matchXPotion("WEAVING")
                     .map(potion -> potion.buildPotionEffect(40, 5))
-                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
             XPotion.matchXPotion("NIGHT_VISION")
                     .map(potion -> potion.buildPotionEffect(40, 0))
-                    .ifPresent(effect -> player.addPotionEffect(effect, true));
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
             XPotion.matchXPotion("HASTE")
                     .map(potion -> potion.buildPotionEffect(40, 3))
-                    .ifPresent(effect -> player.addPotionEffect(effect, true));
-        } else {
-            XPotion.matchXPotion("WEAVING")
-                    .map(potion -> potion.buildPotionEffect(1, 5).getType())
-                    .ifPresent(player::removePotionEffect);
-            XPotion.matchXPotion("NIGHT_VISION")
-                    .map(potion -> potion.buildPotionEffect(1, 0).getType())
-                    .ifPresent(player::removePotionEffect);
-            XPotion.matchXPotion("HASTE")
-                    .map(potion -> potion.buildPotionEffect(1, 1).getType())
-                    .ifPresent(player::removePotionEffect);
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
         }
     }
 
