@@ -194,6 +194,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         UUID playerId = player.getUniqueId();
         int hearts = getHearts(playerId);
 
+        if (ThreadLocalRandom.current().nextDouble() < Math.min(0.30, hearts * 0.03)) {
+            event.getDrops().add(createSoulFragment());
+        }
+
         if (hearts >= MAX_HEARTS) {
             playerData.set(playerPath(playerId) + ".death-banned", true);
             savePlayerData();
