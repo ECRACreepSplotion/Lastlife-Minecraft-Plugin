@@ -263,9 +263,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (chance > 0.0 && ThreadLocalRandom.current().nextDouble() < chance) {
             event.getLoot().add(createSoulFragment());
         }
+        if ("minecraft:chests/ruined_portal".equals(lootTable)
+                && ThreadLocalRandom.current().nextDouble() < 0.02) {
+            event.getLoot().add(createHeartRemover());
+        }
     }
 
     private double getSoulFragmentDropChance(String lootTable) {
+        if ("minecraft:chests/ruined_portal".equals(lootTable)) {
+            return 1.0;
+        }
         if ("minecraft:chests/buried_treasure".equals(lootTable)) {
             return 0.85;
         }
