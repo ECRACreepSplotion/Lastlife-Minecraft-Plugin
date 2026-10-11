@@ -21,6 +21,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -30,6 +31,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.boss.BarColor;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -37,6 +39,7 @@ import org.bukkit.permissions.PermissionAttachment;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.World;
 import org.bukkit.entity.Evoker;
 import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.EnderDragon;
@@ -89,6 +92,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private File playerDataFile;
     private FileConfiguration playerData;
+    private File naturalLootLocationsFile;
+    private FileConfiguration naturalLootLocations;
     private Attribute maxHealthAttribute;
     private NamespacedKey evolvedTotemKey;
     private NamespacedKey evolvedTotemUsesKey;
@@ -144,6 +149,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             throw new IllegalStateException("Could not create the plugin data folder");
         }
         playerData = YamlConfiguration.loadConfiguration(playerDataFile);
+        naturalLootLocationsFile = new File(getDataFolder(), "natural-loot-locations.yml");
+        naturalLootLocations = YamlConfiguration.loadConfiguration(naturalLootLocationsFile);
         registerDemonicInitiatorRecipe();
         registerHeartRemoverRecipe();
         registerSoulTableRecipe();
@@ -152,6 +159,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         getCommand("sethearts").setExecutor(this);
         getCommand("checkhearts").setExecutor(this);
         getCommand("givecustom").setExecutor(this);
+        getCommand("locateitem").setExecutor(this);
         Bukkit.getScheduler().runTaskTimer(this,
                 () -> Bukkit.getOnlinePlayers().forEach(player -> {
                     refreshWardenLeggingsEffects(player);
@@ -172,6 +180,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         if (playerData != null) {
             savePlayerData();
+        }
+        if (naturalLootLocations != null) {
+            saveNaturalLootLocations();
         }
     }
 
@@ -279,6 +290,89 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             if (ThreadLocalRandom.current().nextDouble() < heartRemoverChance) {
                 event.getLoot().add(createHeartRemover());
             }
+        }
+        recordGeneratedLootLocations(event);
+    }
+
+    private void recordGeneratedLootLocations(LootGenerateEvent event) {
+        InventoryHolder holder = event.getInventoryHolder();
+        if (holder == null) {
+            return;
+        }
+
+        Location location = holder instanceof BlockState blockState
+                ? blockState.getLocation()
+                : holder.getInventory().getLocation();
+        if (location == null || location.getWorld() == null) {
+            return;
+        }
+
+        String serializedLocation = location.getWorld().getUID() + ";"
+                + location.getBlockX() + ";" + location.getBlockY() + ";" + location.getBlockZ();
+        boolean updated = false;
+        for (ItemStack item : event.getLoot()) {
+            String itemKey = getNaturalLootItemKey(item);
+            if (itemKey == null) {
+                continue;
+            }
+            String path = "containers." + itemKey;
+            List<String> locations = naturalLootLocations.getStringList(path);
+            if (!locations.contains(serializedLocation)) {
+                locations.add(serializedLocation);
+                naturalLootLocations.set(path, locations);
+                updated = true;
+            }
+        }
+        if (updated) {
+            saveNaturalLootLocations();
+        }
+    }
+
+    private String getNaturalLootItemKey(ItemStack item) {
+        if (isSoulFragment(item)) {
+            return "soul_fragment";
+        }
+        if (isDemonicInitiator(item)) {
+            return "demonic_initiator";
+        }
+        if (isHeartRemover(item)) {
+            return "heart_remover";
+        }
+        return null;
+    }
+
+    private String getNaturalLootItemKey(String itemName) {
+        return switch (normalizeCustomItemName(itemName)) {
+            case "soulfragment", "soulfragments" -> "soul_fragment";
+            case "demonicinitiator" -> "demonic_initiator";
+            case "heartremover" -> "heart_remover";
+            default -> null;
+        };
+    }
+
+    private boolean isNaturalLootItem(ItemStack item, String itemKey) {
+        return switch (itemKey) {
+            case "soul_fragment" -> isSoulFragment(item);
+            case "demonic_initiator" -> isDemonicInitiator(item);
+            case "heart_remover" -> isHeartRemover(item);
+            default -> false;
+        };
+    }
+
+    private String getNaturalLootItemName(String itemKey) {
+        return switch (itemKey) {
+            case "soul_fragment" -> "Soul Fragment";
+            case "demonic_initiator" -> "Demonic Initiator";
+            case "heart_remover" -> "Heart Remover";
+            default -> itemKey;
+        };
+    }
+
+    private void saveNaturalLootLocations() {
+        try {
+            naturalLootLocations.save(naturalLootLocationsFile);
+        } catch (IOException exception) {
+            getLogger().severe("Could not save natural loot locations: " + exception.getMessage());
         }
     }
 
@@ -722,11 +816,72 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             case "sethearts" -> setPlayerHearts(sender, args);
             case "checkhearts" -> checkPlayerHearts(sender, args);
             case "givecustom" -> giveCustomItem(sender, args);
+            case "locateitem" -> locateItem(sender, args);
             default -> {
                 return false;
             }
         }
         return true;
+    }
+
+    private void locateItem(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            sender.sendMessage("Usage: /locateitem <item name>");
+            return;
+        }
+
+        String itemKey = getNaturalLootItemKey(String.join(" ", args));
+        if (itemKey == null) {
+            sender.sendMessage(ChatColor.RED
+                    + "Invalid item. Eligible items: Soul Fragment, Demonic Initiator, Heart Remover.");
+            return;
+        }
+
+        for (String serializedLocation : naturalLootLocations.getStringList("containers." + itemKey)) {
+            String[] coordinates = serializedLocation.split(";", -1);
+            if (coordinates.length != 4) {
+                continue;
+            }
+            try {
+                org.bukkit.World world = Bukkit.getWorld(UUID.fromString(coordinates[0]));
+                if (world == null) {
+                    continue;
+                }
+                int x = Integer.parseInt(coordinates[1]);
+                int y = Integer.parseInt(coordinates[2]);
+                int z = Integer.parseInt(coordinates[3]);
+                Block block = world.getBlockAt(x, y, z);
+                if (!(block.getState() instanceof InventoryHolder holder)
+                        || Arrays.stream(holder.getInventory().getContents())
+                                .noneMatch(item -> isNaturalLootItem(item, itemKey))) {
+                    continue;
+                }
+                sender.sendMessage(ChatColor.GREEN + "Found " + getNaturalLootItemName(itemKey)
+                        + " in a container at " + world.getName() + " " + x + ", " + y + ", " + z + ".");
+                return;
+            } catch (IllegalArgumentException exception) {
+                continue;
+            }
+        }
+        for (World world : Bukkit.getWorlds()) {
+            for (Chunk chunk : world.getLoadedChunks()) {
+                for (BlockState state : chunk.getTileEntities()) {
+                    if (!(state instanceof InventoryHolder holder)
+                            || Arrays.stream(holder.getInventory().getContents())
+                                    .noneMatch(item -> isNaturalLootItem(item, itemKey))) {
+                        continue;
+                    }
+                    Location location = state.getLocation();
+                    sender.sendMessage(ChatColor.GREEN + "Found " + getNaturalLootItemName(itemKey)
+                            + " in a container at " + world.getName() + " "
+                            + location.getBlockX() + ", " + location.getBlockY() + ", "
+                            + location.getBlockZ() + ".");
+                    return;
+                }
+            }
+        }
+        sender.sendMessage(ChatColor.RED + "No container with " + getNaturalLootItemName(itemKey)
+                + " was found. Loot is indexed when its container generates loot.");
     }
 
     private void unbanPlayer(CommandSender sender, String[] args) {

@@ -1,5 +1,5 @@
 name: LastLife
-version: 5.6.1
+version: 5.7.0
 main: com.kodari.lastheart.LastHeartPlugin
 api-version: '1.21'
 author: CreepSplotion
@@ -21,6 +21,10 @@ commands:
     description: Gives a custom item to an online player.
     usage: /givecustom <player> <item name> <amount>
     permission: lastlife.givecustom
+  locateitem:
+    description: Locates a generated container containing a naturally generated custom item.
+    usage: /locateitem <item name>
+    permission: lastlife.locateitem
 permissions:
   lastlife.unban:
     description: Allows unbanning players death-banned at ten hearts.
@@ -33,4 +37,7 @@ permissions:
     default: op
   lastlife.givecustom:
     description: Allows giving custom items to players.
+    default: op
+  lastlife.locateitem:
+    description: Allows locating containers with naturally generated custom items.
     default: op
