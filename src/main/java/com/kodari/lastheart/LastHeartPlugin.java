@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
@@ -32,6 +33,8 @@ import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.boss.BarColor;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.block.TrialSpawner;
+import org.bukkit.block.Vault;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -45,10 +48,13 @@ import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.ElderGuardian;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Warden;
 import org.bukkit.entity.Wither;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
@@ -60,7 +66,10 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EnderDragonChangePhaseEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.event.entity.ItemSpawnEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -71,6 +80,7 @@ import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.world.LootGenerateEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.EquipmentSlotGroup;
 import org.bukkit.inventory.Inventory;
@@ -82,6 +92,8 @@ import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.SmithingTransformRecipe;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
+import org.bukkit.event.block.VaultDisplayItemEvent;
 import org.bukkit.Keyed;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -103,6 +115,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey witherArmorKey;
     private NamespacedKey demonicInitiatorKey;
     private NamespacedKey demonicInitiatorRecipeKey;
+    private NamespacedKey demonicOmenKey;
+    private NamespacedKey demonicTrialKey;
+    private NamespacedKey demonicVaultKey;
     private NamespacedKey empoweredDragonKey;
     private NamespacedKey dragonArmorKey;
     private NamespacedKey dragonChestplateKey;
@@ -114,9 +129,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulTableKey;
     private NamespacedKey soulTableRecipeKey;
     private NamespacedKey soulMaceKey;
+    private NamespacedKey trialItemKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
     private final List<String> customItemNames = new ArrayList<>();
+    private final Map<UUID, Set<Location>> trialChamberMarkers = new HashMap<>();
+    private final Map<String, PendingVaultReward> pendingVaultRewards = new HashMap<>();
 
     @Override
     public void onEnable() {
@@ -131,6 +149,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         witherArmorKey = new NamespacedKey(this, "wither_armor");
         demonicInitiatorKey = new NamespacedKey(this, "demonic_initiator");
         demonicInitiatorRecipeKey = new NamespacedKey(this, "demonic_initiator");
+        demonicOmenKey = new NamespacedKey(this, "demonic_omen");
+        demonicTrialKey = new NamespacedKey(this, "demonic_trial_key");
+        demonicVaultKey = new NamespacedKey(this, "demonic_trial_vault");
         empoweredDragonKey = new NamespacedKey(this, "empowered_dragon");
         dragonArmorKey = new NamespacedKey(this, "dragon_armor");
         dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
@@ -142,6 +163,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulTableKey = new NamespacedKey(this, "soul_table");
         soulTableRecipeKey = new NamespacedKey(this, "soul_table_recipe");
         soulMaceKey = new NamespacedKey(this, "soul_mace");
+        trialItemKey = new NamespacedKey(this, "trial_item");
         registerCustomItemFactories();
 
         playerDataFile = new File(getDataFolder(), "players.yml");
@@ -155,6 +177,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerHeartRemoverRecipe();
         registerSoulTableRecipe();
         Bukkit.getPluginManager().registerEvents(this, this);
+        for (World world : Bukkit.getWorlds()) {
+            for (Chunk chunk : world.getLoadedChunks()) {
+                cacheTrialChamberMarkers(chunk);
+            }
+        }
         getCommand("heartunban").setExecutor(this);
         getCommand("sethearts").setExecutor(this);
         getCommand("checkhearts").setExecutor(this);
@@ -166,6 +193,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshWitherBootsEffects(player);
                     refreshDragonChestplateEffects(player);
                     refreshElderGuardianHelmetEffects(player);
+                    refreshDemonicOmenEffects(player);
                     refreshLocatePermission(player);
                 }), 0L, 20L);
     }
@@ -521,6 +549,153 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     @EventHandler
+    public void onTrialChamberChunkLoad(ChunkLoadEvent event) {
+        cacheTrialChamberMarkers(event.getChunk());
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDemonicTrialSpawnerSpawn(CreatureSpawnEvent event) {
+        if (event.getSpawnReason() != CreatureSpawnEvent.SpawnReason.TRIAL_SPAWNER
+                || !hasNearbyDemonicOmen(event.getLocation())) {
+            return;
+        }
+
+        EntityType replacement = switch (event.getEntityType().name()) {
+            case "BREEZE" -> EntityType.BLAZE;
+            case "SPIDER", "CAVE_SPIDER" -> EntityType.WITHER_SKELETON;
+            default -> null;
+        };
+        if (replacement == null) {
+            return;
+        }
+
+        event.setCancelled(true);
+        event.getLocation().getWorld().spawnEntity(event.getLocation(), replacement);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDemonicVaultInteract(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND
+                || event.getAction() != Action.RIGHT_CLICK_BLOCK
+                || event.getClickedBlock() == null
+                || !(event.getClickedBlock().getState() instanceof Vault vault)
+                || (!isDemonicVault(vault) && !isOminousTrialVault(vault))) {
+            return;
+        }
+
+        configureDemonicVault(vault);
+        if (!isDemonicTrialKey(event.getItem())) {
+            event.setUseInteractedBlock(Event.Result.DENY);
+            return;
+        }
+
+        Player player = event.getPlayer();
+        if (vault.hasRewardedPlayer(player.getUniqueId())) {
+            return;
+        }
+
+        ItemStack reward = createDemonicTrialVaultReward();
+        vault.setDisplayedItem(reward.clone());
+        vault.update(true);
+        String vaultLocation = soulTableLocationKey(event.getClickedBlock());
+        PendingVaultReward pending = new PendingVaultReward(event.getClickedBlock().getLocation(), reward);
+        pendingVaultRewards.put(vaultLocation, pending);
+        Bukkit.getScheduler().runTaskLater(this, () ->
+                pendingVaultRewards.remove(vaultLocation, pending), 4L);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDemonicVaultDisplayItem(VaultDisplayItemEvent event) {
+        if (!(event.getBlock().getState() instanceof Vault vault)
+                || (!isDemonicVault(vault) && !isOminousTrialVault(vault))) {
+            return;
+        }
+
+        configureDemonicVault(vault);
+        event.setDisplayItem(createDemonicTrialVaultReward());
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDemonicTrialItemSpawn(ItemSpawnEvent event) {
+        Item itemEntity = event.getEntity();
+        Location itemLocation = itemEntity.getLocation();
+        for (PendingVaultReward pending : pendingVaultRewards.values()) {
+            if (!pending.location.getWorld().equals(itemLocation.getWorld())
+                    || pending.location.distanceSquared(itemLocation) > 16.0) {
+                continue;
+            }
+            if (pending.delivered) {
+                event.setCancelled(true);
+            } else {
+                pending.delivered = true;
+                itemEntity.setItemStack(pending.reward.clone());
+            }
+            return;
+        }
+
+        ItemStack item = itemEntity.getItemStack();
+        if (!"OMINOUS_TRIAL_KEY".equals(item.getType().name())
+                || !hasNearbyDemonicOmen(itemLocation)) {
+            return;
+        }
+        ItemStack demonicKey = createDemonicTrialKey();
+        demonicKey.setAmount(item.getAmount());
+        itemEntity.setItemStack(demonicKey);
+    }
+
+    private void cacheTrialChamberMarkers(Chunk chunk) {
+        Set<Location> markers = trialChamberMarkers.computeIfAbsent(
+                chunk.getWorld().getUID(), ignored -> new HashSet<>());
+        for (BlockState state : chunk.getTileEntities()) {
+            if (state instanceof TrialSpawner || state instanceof Vault) {
+                markers.add(state.getLocation());
+            }
+        }
+    }
+
+    private boolean isInTrialChamber(Location location) {
+        Set<Location> markers = trialChamberMarkers.get(location.getWorld().getUID());
+        if (markers == null) {
+            return false;
+        }
+        for (Location marker : markers) {
+            if (marker.distanceSquared(location) <= 4096.0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasNearbyDemonicOmen(Location location) {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (hasDemonicOmen(player)
+                    && player.getWorld().equals(location.getWorld())
+                    && player.getLocation().distanceSquared(location) <= 4096.0
+                    && isInTrialChamber(player.getLocation())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isDemonicVault(Vault vault) {
+        return vault.getPersistentDataContainer().has(demonicVaultKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isOminousTrialVault(Vault vault) {
+        return "OMINOUS_TRIAL_KEY".equals(vault.getKeyItem().getType().name());
+    }
+
+    private void configureDemonicVault(Vault vault) {
+        if (isDemonicVault(vault)) {
+            return;
+        }
+        vault.getPersistentDataContainer().set(demonicVaultKey, PersistentDataType.BYTE, (byte) 1);
+        vault.setKeyItem(createDemonicTrialKey());
+        vault.update(true);
+    }
+
+    @EventHandler
     public void onSoulTablePlace(BlockPlaceEvent event) {
         if (!isSoulTable(event.getItemInHand())) {
             return;
@@ -537,6 +712,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onSoulTableBreak(BlockBreakEvent event) {
+        if (hasTrialItems(event.getPlayer())) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(ChatColor.RED + "You cannot carry Soul and Trial items together.");
+            return;
+        }
+
         List<String> soulTables = playerData.getStringList("soul-tables");
         if (!soulTables.remove(soulTableLocationKey(event.getBlock()))) {
             return;
@@ -576,6 +757,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player
+                && wouldAddConflictingItem(player, getItemAddedToPlayerInventory(event))) {
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "You cannot carry Soul and Trial items together.");
+            return;
+        }
+
         if (event.getView().getTopInventory().getHolder() instanceof SoulTableHolder holder) {
             if (event.getRawSlot() >= event.getView().getTopInventory().getSize()) {
                 if (event.isShiftClick()) {
@@ -608,6 +796,15 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player
+                && event.getNewItems().entrySet().stream().anyMatch(entry ->
+                        entry.getKey() >= event.getView().getTopInventory().getSize()
+                                && wouldAddConflictingItem(player, entry.getValue()))) {
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "You cannot carry Soul and Trial items together.");
+            return;
+        }
+
         if (event.getView().getTopInventory().getHolder() instanceof SoulTableHolder) {
             if (event.getRawSlots().stream().anyMatch(slot -> slot < event.getView().getTopInventory().getSize())) {
                 event.setCancelled(true);
@@ -617,6 +814,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (event.getWhoClicked() instanceof Player player) {
             refreshMaxHealthNextTick(player);
         }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onCustomItemPickup(EntityPickupItemEvent event) {
+        if (!(event.getEntity() instanceof Player player)
+                || !wouldAddConflictingItem(player, event.getItem().getItemStack())) {
+            return;
+        }
+        event.setCancelled(true);
+        player.sendMessage(ChatColor.RED + "You cannot carry Soul and Trial items together.");
     }
 
     @EventHandler
@@ -631,6 +838,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         for (int slot = 0; slot < holder.grid.length; slot++) {
             ItemStack item = holder.grid[slot];
             if (isEmpty(item)) {
+                continue;
+            }
+            if (wouldAddConflictingItem(player, item)) {
+                player.getWorld().dropItemNaturally(player.getLocation(), item);
+                holder.grid[slot] = null;
                 continue;
             }
             Map<Integer, ItemStack> overflow = player.getInventory().addItem(item);
@@ -698,6 +910,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         event.setCancelled(true);
         Player player = event.getPlayer();
+        if (isInTrialChamber(player.getLocation())) {
+            if (hasDemonicOmen(player)) {
+                player.sendMessage(ChatColor.DARK_RED + "You already have Demonic Omen.");
+                return;
+            }
+            if (!hasTrialOrBadOmen(player)) {
+                player.sendMessage(ChatColor.RED + "You need Trial Omen or Bad Omen to use the Demonic Initiator here.");
+                return;
+            }
+
+            consumeHeldItem(player, event.getHand());
+            removeTrialAndBadOmen(player);
+            player.getPersistentDataContainer().set(demonicOmenKey, PersistentDataType.BYTE, (byte) 1);
+            player.sendMessage(ChatColor.DARK_RED + "Your omen has become Demonic Omen.");
+            return;
+        }
         if (!"THE_END".equals(player.getWorld().getEnvironment().name())) {
             player.sendMessage(ChatColor.RED + "The Demonic Initiator can only be used in the End.");
             return;
@@ -994,6 +1222,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
 
         ItemStack item = itemFactory.get();
+        if (wouldAddConflictingItem(target, item)) {
+            sender.sendMessage(ChatColor.RED + "That item cannot be carried together with the other Soul or Trial items.");
+            return;
+        }
         item.setAmount(amount);
         target.getInventory().addItem(item).values().forEach(remaining ->
                 target.getWorld().dropItemNaturally(target.getLocation(), remaining));
@@ -1028,6 +1260,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private void registerCustomItemFactories() {
         registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
+        registerCustomItem("Demonic Trial Key", this::createDemonicTrialKey, "demonictrialkey");
         registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("Soul Table", this::createSoulTable, "soultable");
@@ -1148,6 +1381,40 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             XPotion.matchXPotion("HASTE")
                     .map(potion -> potion.buildPotionEffect(40, 3))
                     .ifPresent(effect -> player.addPotionEffect(effect, false));
+        }
+    }
+
+    private void refreshDemonicOmenEffects(Player player) {
+        if (!hasDemonicOmen(player)) {
+            return;
+        }
+        XPotion.matchXPotion("WEAKNESS")
+                .map(potion -> potion.buildPotionEffect(40, 1))
+                .ifPresent(effect -> player.addPotionEffect(effect, false));
+        if (isInTrialChamber(player.getLocation())) {
+            XPotion.matchXPotion("WITHER")
+                    .map(potion -> potion.buildPotionEffect(40, 0))
+                    .ifPresent(effect -> player.addPotionEffect(effect, false));
+            activateNearbyDemonicTrialSpawners(player);
+        }
+    }
+
+    private void activateNearbyDemonicTrialSpawners(Player player) {
+        Set<Location> markers = trialChamberMarkers.get(player.getWorld().getUID());
+        if (markers == null) {
+            return;
+        }
+        Location playerLocation = player.getLocation();
+        for (Location marker : markers) {
+            if (marker.distanceSquared(playerLocation) > 256.0
+                    || !player.getWorld().isChunkLoaded(marker.getBlockX() >> 4, marker.getBlockZ() >> 4)) {
+                continue;
+            }
+            BlockState state = marker.getBlock().getState();
+            if (state instanceof TrialSpawner spawner && !spawner.isOminous()) {
+                spawner.setOminous(true);
+                spawner.update(true);
+            }
         }
     }
 
@@ -1307,6 +1574,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void craftSoulMace(Player player, SoulTableHolder holder) {
+        if (hasTrialItems(player)) {
+            player.sendMessage(ChatColor.RED + "You cannot carry Soul and Trial items together.");
+            return;
+        }
         if (!isSoulMaceRecipe(holder.grid)) {
             player.sendMessage(ChatColor.RED + "The Soul Mace recipe is incomplete.");
             return;
@@ -1372,6 +1643,87 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
         initiator.setItemMeta(meta);
         return initiator;
+    }
+
+    private ItemStack createDemonicTrialKey() {
+        ItemStack key = XMaterial.matchXMaterial("OMINOUS_TRIAL_KEY")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Ominous trial key is unavailable"));
+        ItemMeta meta = key.getItemMeta();
+        meta.setDisplayName(ChatColor.DARK_RED + "Demonic Trial Key");
+        meta.getPersistentDataContainer().set(demonicTrialKey, PersistentDataType.BYTE, (byte) 1);
+        meta.getPersistentDataContainer().set(trialItemKey, PersistentDataType.BYTE, (byte) 1);
+        key.setItemMeta(meta);
+        return key;
+    }
+
+    private ItemStack createDemonicTrialVaultReward() {
+        int roll = ThreadLocalRandom.current().nextInt(100);
+        if (roll < 50) {
+            return createWindBurstBook();
+        }
+        if (roll < 70) {
+            return createTrialLootItem("ENCHANTED_GOLDEN_APPLE", null);
+        }
+        if (roll < 80) {
+            return createTrialLootItem("HEAVY_CORE", null);
+        }
+        if (roll < 85) {
+            return createTrialLootItem("NETHERITE_BLOCK", null);
+        }
+        if (roll < 87) {
+            return createTrialLootItem("TOTEM_OF_UNDYING", "The Trials Totem");
+        }
+        if (roll < 89) {
+            return createTrialLootItem("SHIELD", "The Trials Shield");
+        }
+        if (roll < 91) {
+            return createTrialLootItem("NETHERITE_HELMET", "The Trial's Netherite Helmet");
+        }
+        if (roll < 93) {
+            return createTrialLootItem("NETHERITE_LEGGINGS", "The Trial's Netherite Leggings");
+        }
+        if (roll < 95) {
+            return createTrialLootItem("NETHERITE_CHESTPLATE", "The Trial's Netherite Chestplate");
+        }
+        if (roll < 97) {
+            return createTrialLootItem("NETHERITE_BOOTS", "The Trial's Netherite Boots");
+        }
+        if (roll < 98) {
+            return createTrialLootItem("MACE", "The Trial's Mace");
+        }
+        ItemStack keys = createDemonicTrialKey();
+        keys.setAmount(4);
+        return keys;
+    }
+
+    private ItemStack createWindBurstBook() {
+        ItemStack book = XMaterial.matchXMaterial("ENCHANTED_BOOK")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Enchanted book is unavailable"));
+        ItemMeta meta = book.getItemMeta();
+        if (!(meta instanceof EnchantmentStorageMeta enchantmentMeta)) {
+            throw new IllegalStateException("Enchanted book metadata is unavailable");
+        }
+        XEnchantment.matchXEnchantment("WIND_BURST")
+                .ifPresentOrElse(enchantment -> enchantmentMeta.addStoredEnchant(
+                                enchantment.getEnchant(), 1, true),
+                        () -> { throw new IllegalStateException("Wind Burst enchantment is unavailable"); });
+        book.setItemMeta(enchantmentMeta);
+        return book;
+    }
+
+    private ItemStack createTrialLootItem(String materialName, String displayName) {
+        ItemStack item = XMaterial.matchXMaterial(materialName)
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException(materialName + " is unavailable"));
+        if (displayName != null) {
+            ItemMeta meta = item.getItemMeta();
+            meta.setDisplayName(ChatColor.AQUA + displayName);
+            meta.getPersistentDataContainer().set(trialItemKey, PersistentDataType.BYTE, (byte) 1);
+            item.setItemMeta(meta);
+        }
+        return item;
     }
 
     private ItemStack createSoulFragment() {
@@ -1738,6 +2090,114 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .has(demonicInitiatorKey, PersistentDataType.BYTE);
     }
 
+    private boolean isDemonicTrialKey(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(demonicTrialKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isTrialItem(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        ItemMeta meta = item.getItemMeta();
+        if (meta.getPersistentDataContainer().has(trialItemKey, PersistentDataType.BYTE)
+                || isDemonicTrialKey(item)) {
+            return true;
+        }
+        if (!meta.hasDisplayName()) {
+            return false;
+        }
+        String displayName = ChatColor.stripColor(meta.getDisplayName());
+        return displayName != null && (displayName.startsWith("The Trial's ")
+                || "The Trials Totem".equals(displayName)
+                || "The Trials Shield".equals(displayName));
+    }
+
+    private boolean isSoulItem(ItemStack item) {
+        return isSoulFragment(item) || isSoulTable(item) || isSoulMace(item);
+    }
+
+    private boolean hasSoulItems(Player player) {
+        return hasInventoryItem(player, this::isSoulItem);
+    }
+
+    private boolean hasTrialItems(Player player) {
+        return hasInventoryItem(player, this::isTrialItem);
+    }
+
+    private boolean hasInventoryItem(Player player, Predicate<ItemStack> matcher) {
+        PlayerInventory inventory = player.getInventory();
+        return Arrays.stream(inventory.getContents()).anyMatch(matcher)
+                || Arrays.stream(inventory.getArmorContents()).anyMatch(matcher)
+                || matcher.test(inventory.getItemInOffHand());
+    }
+
+    private boolean wouldAddConflictingItem(Player player, ItemStack incoming) {
+        return (isSoulItem(incoming) && hasTrialItems(player))
+                || (isTrialItem(incoming) && hasSoulItems(player));
+    }
+
+    private ItemStack getItemAddedToPlayerInventory(InventoryClickEvent event) {
+        Inventory clicked = event.getClickedInventory();
+        Inventory playerInventory = event.getView().getBottomInventory();
+        if (clicked == null) {
+            return null;
+        }
+        InventoryAction action = event.getAction();
+        if (clicked != playerInventory
+                && (action == InventoryAction.MOVE_TO_OTHER_INVENTORY
+                        || action == InventoryAction.HOTBAR_SWAP
+                        || action == InventoryAction.HOTBAR_MOVE_AND_READD)) {
+            return event.getCurrentItem();
+        }
+        if (clicked == playerInventory
+                && (action == InventoryAction.PLACE_ALL
+                        || action == InventoryAction.PLACE_ONE
+                        || action == InventoryAction.PLACE_SOME
+                        || action == InventoryAction.SWAP_WITH_CURSOR)) {
+            return event.getCursor();
+        }
+        return null;
+    }
+
+    private boolean hasDemonicOmen(Player player) {
+        return player.getPersistentDataContainer().has(demonicOmenKey, PersistentDataType.BYTE);
+    }
+
+    private boolean hasTrialOrBadOmen(Player player) {
+        return player.getActivePotionEffects().stream().anyMatch(effect -> {
+            String effectKey = effect.getType().getKey().getKey();
+            return "trial_omen".equals(effectKey) || "bad_omen".equals(effectKey);
+        });
+    }
+
+    private void removeTrialAndBadOmen(Player player) {
+        for (var effect : new ArrayList<>(player.getActivePotionEffects())) {
+            String effectKey = effect.getType().getKey().getKey();
+            if ("trial_omen".equals(effectKey) || "bad_omen".equals(effectKey)) {
+                player.removePotionEffect(effect.getType());
+            }
+        }
+    }
+
+    private void consumeHeldItem(Player player, EquipmentSlot hand) {
+        ItemStack item = hand == EquipmentSlot.OFF_HAND
+                ? player.getInventory().getItemInOffHand()
+                : player.getInventory().getItemInMainHand();
+        if (item.getAmount() <= 1) {
+            if (hand == EquipmentSlot.OFF_HAND) {
+                player.getInventory().setItemInOffHand(null);
+            } else {
+                player.getInventory().setItemInMainHand(null);
+            }
+        } else {
+            item.setAmount(item.getAmount() - 1);
+        }
+    }
+
     private boolean isEmpoweredDragon(EnderDragon dragon) {
         return dragon.getPersistentDataContainer().has(empoweredDragonKey, PersistentDataType.BYTE);
     }
@@ -1780,6 +2240,17 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             playerData.save(playerDataFile);
         } catch (IOException exception) {
             getLogger().severe("Could not save player data: " + exception.getMessage());
+        }
+    }
+
+    private static final class PendingVaultReward {
+        private final Location location;
+        private final ItemStack reward;
+        private boolean delivered;
+
+        private PendingVaultReward(Location location, ItemStack reward) {
+            this.location = location.clone();
+            this.reward = reward.clone();
         }
     }
 
