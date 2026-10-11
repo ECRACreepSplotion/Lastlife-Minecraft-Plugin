@@ -259,13 +259,27 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onStructureLootGenerate(LootGenerateEvent event) {
         String lootTable = event.getLootTable().getKey().toString();
-        double chance = getSoulFragmentDropChance(lootTable);
+        boolean bastionChest = lootTable.startsWith("minecraft:chests/bastion/");
+        double chance = bastionChest ? 1.0 : getSoulFragmentDropChance(lootTable);
         if (chance > 0.0 && ThreadLocalRandom.current().nextDouble() < chance) {
             event.getLoot().add(createSoulFragment());
         }
         if ("minecraft:chests/ruined_portal".equals(lootTable)
                 && ThreadLocalRandom.current().nextDouble() < 0.02) {
             event.getLoot().add(createHeartRemover());
+        }
+        if (bastionChest) {
+            if ("minecraft:chests/bastion/treasure".equals(lootTable)) {
+                event.getLoot().add(createDemonicInitiator());
+            }
+            double heartRemoverChance = switch (lootTable) {
+                case "minecraft:chests/bastion/bridge", "minecraft:chests/bastion/other" -> 0.05;
+                case "minecraft:chests/bastion/treasure", "minecraft:chests/bastion/hoglin_stable" -> 0.15;
+                default -> 0.0;
+            };
+            if (ThreadLocalRandom.current().nextDouble() < heartRemoverChance) {
+                event.getLoot().add(createHeartRemover());
+            }
         }
     }
 
