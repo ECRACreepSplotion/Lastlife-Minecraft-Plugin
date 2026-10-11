@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.kodari.lastlife'
-version = '5.6.0'
+version = '5.6.1'
 
 repositories {
     mavenCentral()

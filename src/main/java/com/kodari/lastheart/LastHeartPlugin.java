@@ -256,27 +256,26 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onStructureLootGenerate(LootGenerateEvent event) {
-        String lootTable = event.getLootTable().getKey().toString();
-        boolean bastionChest = lootTable.startsWith("minecraft:chests/bastion/");
+        String lootTable = event.getLootTable().getKey().getKey();
+        boolean bastionChest = lootTable.startsWith("chests/bastion/")
+                || lootTable.startsWith("chests/bastion_");
         double chance = bastionChest ? 1.0 : getSoulFragmentDropChance(lootTable);
         if (chance > 0.0 && ThreadLocalRandom.current().nextDouble() < chance) {
             event.getLoot().add(createSoulFragment());
         }
-        if ("minecraft:chests/ruined_portal".equals(lootTable)
+        if ("chests/ruined_portal".equals(lootTable)
                 && ThreadLocalRandom.current().nextDouble() < 0.02) {
             event.getLoot().add(createHeartRemover());
         }
         if (bastionChest) {
-            if ("minecraft:chests/bastion/treasure".equals(lootTable)) {
+            if (isBastionLootTable(lootTable, "treasure")) {
                 event.getLoot().add(createDemonicInitiator());
             }
-            double heartRemoverChance = switch (lootTable) {
-                case "minecraft:chests/bastion/bridge", "minecraft:chests/bastion/other" -> 0.05;
-                case "minecraft:chests/bastion/treasure", "minecraft:chests/bastion/hoglin_stable" -> 0.15;
-                default -> 0.0;
-            };
+            double heartRemoverChance = isBastionLootTable(lootTable, "bridge", "other")
+                    ? 0.05
+                    : isBastionLootTable(lootTable, "treasure", "hoglin_stable") ? 0.15 : 0.0;
             if (ThreadLocalRandom.current().nextDouble() < heartRemoverChance) {
                 event.getLoot().add(createHeartRemover());
             }
@@ -284,28 +283,38 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private double getSoulFragmentDropChance(String lootTable) {
-        if ("minecraft:chests/ruined_portal".equals(lootTable)) {
+        if ("chests/ruined_portal".equals(lootTable)) {
             return 1.0;
         }
-        if ("minecraft:chests/buried_treasure".equals(lootTable)) {
+        if ("chests/buried_treasure".equals(lootTable)) {
             return 0.85;
         }
-        if (lootTable.startsWith("minecraft:chests/shipwreck_")) {
+        if (lootTable.startsWith("chests/shipwreck_")) {
             return 0.60;
         }
-        if ("minecraft:chests/jungle_temple".equals(lootTable)) {
+        if ("chests/jungle_temple".equals(lootTable)) {
             return 1.0;
         }
-        if ("minecraft:chests/pillager_outpost".equals(lootTable)) {
+        if ("chests/pillager_outpost".equals(lootTable)) {
             return 0.45;
         }
-        if ("minecraft:chests/desert_pyramid".equals(lootTable)) {
+        if ("chests/desert_pyramid".equals(lootTable)) {
             return 0.50;
         }
-        if (lootTable.startsWith("minecraft:chests/village/")) {
+        if (lootTable.startsWith("chests/village/")) {
             return 0.25;
         }
         return 0.0;
+    }
+
+    private boolean isBastionLootTable(String lootTable, String... types) {
+        for (String type : types) {
+            if (lootTable.equals("chests/bastion/" + type)
+                    || lootTable.equals("chests/bastion_" + type)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @EventHandler
