@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:i_feel_dizzy",
+  "display": {
+    "icon": {
+      "id": "minecraft:netherite_chestplate"
+    },
+    "title": {
+      "text": "I Hate You"
+    },
+    "description": {
+      "text": "You know how long this took me? I'm cooking this egg for dessert! Obtain a full set of The Ender Dragon's armor",
+      "color": "dark_purple"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 3.0,
+    "y": 1.0
+  },
+  "criteria": {
+    "obtain_ender_dragon_armor": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

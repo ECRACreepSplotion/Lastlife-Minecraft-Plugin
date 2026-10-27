@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:wearing_the_fallens_flesh",
+  "display": {
+    "icon": {
+      "id": "minecraft:dragon_head"
+    },
+    "title": {
+      "text": "Here We Go Again"
+    },
+    "description": {
+      "text": "I've beaten you countless times before, what makes this any different? Use a Demonic Initiator whilst in the end to empower the Ender Dragon.",
+      "color": "gray"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 1.0,
+    "y": 1.0
+  },
+  "criteria": {
+    "empower_ender_dragon": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

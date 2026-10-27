@@ -128,6 +128,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey riseAdvancementKey;
     private NamespacedKey decayingAdvancementKey;
     private NamespacedKey oceanManAdvancementKey;
+    private NamespacedKey hereWeGoAgainAdvancementKey;
+    private NamespacedKey feelDizzyAdvancementKey;
+    private NamespacedKey iHateYouAdvancementKey;
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
     private NamespacedKey soulTableKey;
@@ -170,6 +173,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         riseAdvancementKey = new NamespacedKey(this, "rise");
         decayingAdvancementKey = new NamespacedKey(this, "decaying");
         oceanManAdvancementKey = new NamespacedKey(this, "ocean_man");
+        hereWeGoAgainAdvancementKey = new NamespacedKey(this, "here_we_go_again");
+        feelDizzyAdvancementKey = new NamespacedKey(this, "i_feel_dizzy");
+        iHateYouAdvancementKey = new NamespacedKey(this, "i_hate_you");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         soulTableKey = new NamespacedKey(this, "soul_table");
@@ -191,6 +197,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerAdvancement(riseAdvancementKey, "advancements/rise.json");
         registerAdvancement(decayingAdvancementKey, "advancements/decaying.json");
         registerAdvancement(oceanManAdvancementKey, "advancements/ocean_man.json");
+        registerAdvancement(hereWeGoAgainAdvancementKey, "advancements/here_we_go_again.json");
+        registerAdvancement(feelDizzyAdvancementKey, "advancements/i_feel_dizzy.json");
+        registerAdvancement(iHateYouAdvancementKey, "advancements/i_hate_you.json");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -224,6 +233,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshRiseAdvancement(player);
                     refreshDecayingAdvancement(player);
                     refreshOceanManAdvancement(player);
+                    refreshIHateYouAdvancement(player);
                 }), 0L, 20L);
     }
 
@@ -535,6 +545,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             return;
         }
 
+        Player killer = dragon.getKiller();
+        if (killer != null) {
+            awardAdvancement(killer, feelDizzyAdvancementKey);
+        }
+
         int guaranteedChestplates = playerData.getInt("dragon.guaranteed-chestplates", 0);
         if (guaranteedChestplates > 0) {
             event.getDrops().add(createDragonArmor("NETHERITE_CHESTPLATE", "Chestplate", true));
@@ -811,6 +826,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             initiator.setAmount(initiator.getAmount() - 1);
         }
         empowerDragon(dragon);
+        awardAdvancement(player, hereWeGoAgainAdvancementKey);
         player.sendMessage(ChatColor.DARK_PURPLE + "The Ender Dragon has been empowered!");
     }
 
@@ -1577,6 +1593,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private void refreshOceanManAdvancement(Player player) {
         if (hasFullBossArmorSet(player, elderGuardianArmorKey)) {
             awardAdvancement(player, oceanManAdvancementKey);
+        }
+    }
+
+    private void refreshIHateYouAdvancement(Player player) {
+        if (hasFullBossArmorSet(player, dragonArmorKey)) {
+            awardAdvancement(player, iHateYouAdvancementKey);
         }
     }
 

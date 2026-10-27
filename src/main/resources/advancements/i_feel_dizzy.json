@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:here_we_go_again",
+  "display": {
+    "icon": {
+      "id": "minecraft:dragon_head"
+    },
+    "title": {
+      "text": "I Feel Dizzy"
+    },
+    "description": {
+      "text": "I hope I don't have to do that again. Defeat the Ender Dragon after its been empowered",
+      "color": "dark_purple"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 2.0,
+    "y": 1.0
+  },
+  "criteria": {
+    "defeat_empowered_ender_dragon": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
