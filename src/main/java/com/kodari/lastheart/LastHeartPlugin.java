@@ -119,6 +119,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey theTotemTotemAdvancementKey;
     private NamespacedKey shhhAdvancementKey;
     private NamespacedKey turningTablesAdvancementKey;
+    private NamespacedKey bringMeTheirSoulsAdvancementKey;
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
     private NamespacedKey soulTableKey;
@@ -152,6 +153,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         theTotemTotemAdvancementKey = new NamespacedKey(this, "the_totem_totem");
         shhhAdvancementKey = new NamespacedKey(this, "shhh");
         turningTablesAdvancementKey = new NamespacedKey(this, "turning_tables");
+        bringMeTheirSoulsAdvancementKey = new NamespacedKey(this, "bring_me_their_souls");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         soulTableKey = new NamespacedKey(this, "soul_table");
@@ -163,6 +165,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerAdvancement(theTotemTotemAdvancementKey, "advancements/the_totem_totem.json");
         registerAdvancement(shhhAdvancementKey, "advancements/shhh.json");
         registerAdvancement(turningTablesAdvancementKey, "advancements/turning_tables.json");
+        registerAdvancement(bringMeTheirSoulsAdvancementKey, "advancements/bring_me_their_souls.json");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -1350,6 +1353,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
         }
 
+        awardAdvancement(player, bringMeTheirSoulsAdvancementKey);
         Map<Integer, ItemStack> overflow = player.getInventory().addItem(createSoulMace());
         overflow.values().forEach(item -> player.getWorld()
                 .dropItemNaturally(player.getLocation(), item));
