@@ -9,10 +9,10 @@
     "description": {
       "text": "Discover the power of Soul Fragments."
     },
-    "background": "minecraft:textures/gui/advancements/backgrounds/adventure.png",
+    "background": "minecraft:textures/block/obsidian.png",
     "frame": "task",
     "show_toast": false,
-    "announce_to_chat": false,
+    "announce_to_chat": true,
     "hidden": true
   },
   "criteria": {

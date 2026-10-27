@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:soul_gathering",
+  "display": {
+    "icon": {
+      "id": "minecraft:totem_of_undying"
+    },
+    "title": {
+      "text": "The Totem Totem"
+    },
+    "description": {
+      "text": "Obtain a V1 Evolved Totem.",
+      "color": "gray"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 2.0,
+    "y": 0.0
+  },
+  "criteria": {
+    "has_evolved_totem": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
