@@ -1,0 +1,23 @@
+{
+  "parent": "lastlife:lastlife_root",
+  "display": {
+    "icon": {
+      "id": "minecraft:wither_rose"
+    },
+    "title": {
+      "text": "Soul Gathering"
+    },
+    "description": {
+      "text": "Obtain a Soul Fragment."
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": false,
+    "hidden": true
+  },
+  "criteria": {
+    "has_soul_fragment": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

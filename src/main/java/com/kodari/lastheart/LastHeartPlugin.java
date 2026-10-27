@@ -17,6 +17,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import org.bukkit.BanList;
@@ -29,6 +31,8 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
+import org.bukkit.advancement.Advancement;
+import org.bukkit.advancement.AdvancementProgress;
 import org.bukkit.boss.BarColor;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
@@ -109,6 +113,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey elderGuardianArmorKey;
     private NamespacedKey elderGuardianHelmetKey;
     private NamespacedKey soulFragmentKey;
+    private NamespacedKey lastLifeRootAdvancementKey;
+    private NamespacedKey soulGatheringAdvancementKey;
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
     private NamespacedKey soulTableKey;
@@ -137,12 +143,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         elderGuardianArmorKey = new NamespacedKey(this, "elder_guardian_armor");
         elderGuardianHelmetKey = new NamespacedKey(this, "elder_guardian_helmet");
         soulFragmentKey = new NamespacedKey(this, "soul_fragment");
+        lastLifeRootAdvancementKey = new NamespacedKey(this, "lastlife_root");
+        soulGatheringAdvancementKey = new NamespacedKey(this, "soul_gathering");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         soulTableKey = new NamespacedKey(this, "soul_table");
         soulTableRecipeKey = new NamespacedKey(this, "soul_table_recipe");
         soulMaceKey = new NamespacedKey(this, "soul_mace");
         registerCustomItemFactories();
+        registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
+        registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -167,6 +177,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshDragonChestplateEffects(player);
                     refreshElderGuardianHelmetEffects(player);
                     refreshLocatePermission(player);
+                    refreshSoulGatheringAdvancement(player);
                 }), 0L, 20L);
     }
 
@@ -1383,6 +1394,49 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         meta.getPersistentDataContainer().set(soulFragmentKey, PersistentDataType.BYTE, (byte) 1);
         fragment.setItemMeta(meta);
         return fragment;
+    }
+
+    private void registerAdvancement(NamespacedKey key, String resourcePath) {
+        if (Bukkit.getAdvancement(key) != null) {
+            return;
+        }
+        try (InputStream input = getResource(resourcePath)) {
+            if (input == null) {
+                throw new IllegalStateException("Missing advancement resource: " + resourcePath);
+            }
+            String json = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            if (Bukkit.getUnsafe().loadAdvancement(key, json) == null) {
+                throw new IllegalStateException("Could not load advancement: " + key);
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not read advancement resource: " + resourcePath, exception);
+        }
+    }
+
+    private void refreshSoulGatheringAdvancement(Player player) {
+        boolean hasSoulFragment = false;
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (isSoulFragment(item)) {
+                hasSoulFragment = true;
+                break;
+            }
+        }
+        if (!hasSoulFragment) {
+            return;
+        }
+        awardAdvancement(player, lastLifeRootAdvancementKey);
+        awardAdvancement(player, soulGatheringAdvancementKey);
+    }
+
+    private void awardAdvancement(Player player, NamespacedKey key) {
+        Advancement advancement = Bukkit.getAdvancement(key);
+        if (advancement == null) {
+            return;
+        }
+        AdvancementProgress progress = player.getAdvancementProgress(advancement);
+        for (String criterion : progress.getRemainingCriteria()) {
+            progress.awardCriteria(criterion);
+        }
     }
 
     private ItemStack createSoulTable() {
