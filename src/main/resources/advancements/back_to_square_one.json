@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:octopi",
+  "display": {
+    "icon": {
+      "id": "minecraft:stone"
+    },
+    "title": {
+      "text": "Back To Square One"
+    },
+    "description": {
+      "text": "Or heart 1 for that matter. Go from having 10 or more max hearts to being back on 1 max heart.",
+      "color": "dark_purple"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 0.0,
+    "y": 1.0
+  },
+  "criteria": {
+    "return_to_one_max_heart": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:the_totem_totem",
+  "display": {
+    "icon": {
+      "id": "minecraft:netherite_chestplate"
+    },
+    "title": {
+      "text": "A Hero's Reward"
+    },
+    "description": {
+      "text": "Kill a boss and claim its custom drop.",
+      "color": "gray"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 0.0,
+    "y": 1.0
+  },
+  "criteria": {
+    "claim_boss_drop": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

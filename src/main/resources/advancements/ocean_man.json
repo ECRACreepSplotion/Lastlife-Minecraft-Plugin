@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:wearing_the_fallens_flesh",
+  "display": {
+    "icon": {
+      "id": "minecraft:netherite_helmet"
+    },
+    "title": {
+      "text": "Ocean Man"
+    },
+    "description": {
+      "text": "The monuments are mine for the keeping. Obtain a full set of The Elder Guardian's armor",
+      "color": "dark_purple"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 2.0,
+    "y": 2.0
+  },
+  "criteria": {
+    "obtain_elder_guardian_armor": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:a_heros_reward",
+  "display": {
+    "icon": {
+      "id": "minecraft:netherite_chestplate"
+    },
+    "title": {
+      "text": "Wearing The Fallen's Flesh"
+    },
+    "description": {
+      "text": "I have conquered, and taken my trophy! Kill a boss, and wear it's dropped armor.",
+      "color": "gray"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 0.0,
+    "y": 1.0
+  },
+  "criteria": {
+    "wear_boss_armor": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

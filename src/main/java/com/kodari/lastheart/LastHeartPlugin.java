@@ -116,10 +116,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulFragmentKey;
     private NamespacedKey lastLifeRootAdvancementKey;
     private NamespacedKey soulGatheringAdvancementKey;
+    private NamespacedKey riskyResetAdvancementKey;
+    private NamespacedKey octopiAdvancementKey;
+    private NamespacedKey backToSquareOneAdvancementKey;
     private NamespacedKey theTotemTotemAdvancementKey;
     private NamespacedKey shhhAdvancementKey;
     private NamespacedKey turningTablesAdvancementKey;
     private NamespacedKey bringMeTheirSoulsAdvancementKey;
+    private NamespacedKey aHerosRewardAdvancementKey;
+    private NamespacedKey wearingTheFallensFleshAdvancementKey;
+    private NamespacedKey riseAdvancementKey;
+    private NamespacedKey decayingAdvancementKey;
+    private NamespacedKey oceanManAdvancementKey;
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
     private NamespacedKey soulTableKey;
@@ -150,10 +158,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulFragmentKey = new NamespacedKey(this, "soul_fragment");
         lastLifeRootAdvancementKey = new NamespacedKey(this, "lastlife_root");
         soulGatheringAdvancementKey = new NamespacedKey(this, "soul_gathering");
+        riskyResetAdvancementKey = new NamespacedKey(this, "risky_reset");
+        octopiAdvancementKey = new NamespacedKey(this, "octopi");
+        backToSquareOneAdvancementKey = new NamespacedKey(this, "back_to_square_one");
         theTotemTotemAdvancementKey = new NamespacedKey(this, "the_totem_totem");
         shhhAdvancementKey = new NamespacedKey(this, "shhh");
         turningTablesAdvancementKey = new NamespacedKey(this, "turning_tables");
         bringMeTheirSoulsAdvancementKey = new NamespacedKey(this, "bring_me_their_souls");
+        aHerosRewardAdvancementKey = new NamespacedKey(this, "a_heros_reward");
+        wearingTheFallensFleshAdvancementKey = new NamespacedKey(this, "wearing_the_fallens_flesh");
+        riseAdvancementKey = new NamespacedKey(this, "rise");
+        decayingAdvancementKey = new NamespacedKey(this, "decaying");
+        oceanManAdvancementKey = new NamespacedKey(this, "ocean_man");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         soulTableKey = new NamespacedKey(this, "soul_table");
@@ -162,10 +178,19 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerCustomItemFactories();
         registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
+        registerAdvancement(riskyResetAdvancementKey, "advancements/risky_reset.json");
+        registerAdvancement(octopiAdvancementKey, "advancements/octopi.json");
+        registerAdvancement(backToSquareOneAdvancementKey, "advancements/back_to_square_one.json");
         registerAdvancement(theTotemTotemAdvancementKey, "advancements/the_totem_totem.json");
         registerAdvancement(shhhAdvancementKey, "advancements/shhh.json");
         registerAdvancement(turningTablesAdvancementKey, "advancements/turning_tables.json");
         registerAdvancement(bringMeTheirSoulsAdvancementKey, "advancements/bring_me_their_souls.json");
+        registerAdvancement(aHerosRewardAdvancementKey, "advancements/a_heros_reward.json");
+        registerAdvancement(wearingTheFallensFleshAdvancementKey,
+                "advancements/wearing_the_fallens_flesh.json");
+        registerAdvancement(riseAdvancementKey, "advancements/rise.json");
+        registerAdvancement(decayingAdvancementKey, "advancements/decaying.json");
+        registerAdvancement(oceanManAdvancementKey, "advancements/ocean_man.json");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -191,8 +216,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshElderGuardianHelmetEffects(player);
                     refreshLocatePermission(player);
                     refreshSoulGatheringAdvancement(player);
+                    refreshRiskyResetAdvancement(player);
+                    refreshBackToSquareOneAdvancement(player);
                     refreshTheTotemTotemAdvancement(player);
                     refreshShhhAdvancement(player);
+                    refreshWearingTheFallensFleshAdvancement(player);
+                    refreshRiseAdvancement(player);
+                    refreshDecayingAdvancement(player);
+                    refreshOceanManAdvancement(player);
                 }), 0L, 20L);
     }
 
@@ -290,6 +321,26 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             event.getDrops().add(createElderGuardianArmor("NETHERITE_CHESTPLATE", "Chestplate", false));
         } else {
             event.getDrops().add(createElderGuardianArmor("NETHERITE_HELMET", "Helmet", true));
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onBossDropAdvancement(EntityDeathEvent event) {
+        LivingEntity boss = event.getEntity();
+        if (!(boss instanceof Warden) && !(boss instanceof Wither)
+                && !(boss instanceof EnderDragon) && !(boss instanceof ElderGuardian)) {
+            return;
+        }
+
+        Player killer = boss.getKiller();
+        if (killer == null) {
+            return;
+        }
+        for (ItemStack drop : event.getDrops()) {
+            if (isCustomBossArmor(drop)) {
+                awardAdvancement(killer, aHerosRewardAdvancementKey);
+                return;
+            }
         }
     }
 
@@ -1056,6 +1107,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             item.setAmount(item.getAmount() - 1);
         }
         applyMaxHealth(player, false);
+        awardAdvancement(player, octopiAdvancementKey);
         player.sendMessage(ChatColor.RED + "You sacrificed one heart for an extra life. This cannot be undone.");
     }
 
@@ -1451,6 +1503,27 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         awardAdvancement(player, soulGatheringAdvancementKey);
     }
 
+    private void refreshRiskyResetAdvancement(Player player) {
+        Advancement parent = Bukkit.getAdvancement(soulGatheringAdvancementKey);
+        AttributeInstance attribute = player.getAttribute(maxHealthAttribute);
+        if (parent != null && player.getAdvancementProgress(parent).isDone()
+                && attribute != null && attribute.getValue() >= 20.0) {
+            awardAdvancement(player, riskyResetAdvancementKey);
+        }
+    }
+
+    private void refreshBackToSquareOneAdvancement(Player player) {
+        Advancement riskyReset = Bukkit.getAdvancement(riskyResetAdvancementKey);
+        Advancement octopi = Bukkit.getAdvancement(octopiAdvancementKey);
+        AttributeInstance attribute = player.getAttribute(maxHealthAttribute);
+        if (riskyReset != null && octopi != null && attribute != null
+                && player.getAdvancementProgress(riskyReset).isDone()
+                && player.getAdvancementProgress(octopi).isDone()
+                && attribute.getValue() == 2.0) {
+            awardAdvancement(player, backToSquareOneAdvancementKey);
+        }
+    }
+
     private void refreshTheTotemTotemAdvancement(Player player) {
         for (ItemStack item : player.getInventory().getContents()) {
             if (isEvolvedTotem(item)) {
@@ -1466,6 +1539,64 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 awardAdvancement(player, shhhAdvancementKey);
                 return;
             }
+        }
+    }
+
+    private boolean isCustomBossArmor(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) {
+            return false;
+        }
+        ItemMeta meta = item.getItemMeta();
+        return meta.getPersistentDataContainer().has(wardenArmorKey, PersistentDataType.BYTE)
+                || meta.getPersistentDataContainer().has(witherArmorKey, PersistentDataType.BYTE)
+                || meta.getPersistentDataContainer().has(dragonArmorKey, PersistentDataType.BYTE)
+                || meta.getPersistentDataContainer().has(elderGuardianArmorKey, PersistentDataType.BYTE);
+    }
+
+    private void refreshWearingTheFallensFleshAdvancement(Player player) {
+        for (ItemStack item : player.getInventory().getArmorContents()) {
+            if (isCustomBossArmor(item)) {
+                awardAdvancement(player, wearingTheFallensFleshAdvancementKey);
+                return;
+            }
+        }
+    }
+
+    private void refreshRiseAdvancement(Player player) {
+        if (hasFullBossArmorSet(player, wardenArmorKey)) {
+            awardAdvancement(player, riseAdvancementKey);
+        }
+    }
+
+    private void refreshDecayingAdvancement(Player player) {
+        if (hasFullBossArmorSet(player, witherArmorKey)) {
+            awardAdvancement(player, decayingAdvancementKey);
+        }
+    }
+
+    private void refreshOceanManAdvancement(Player player) {
+        if (hasFullBossArmorSet(player, elderGuardianArmorKey)) {
+            awardAdvancement(player, oceanManAdvancementKey);
+        }
+    }
+
+    private boolean hasFullBossArmorSet(Player player, NamespacedKey armorKey) {
+        Set<String> pieces = new HashSet<>();
+        for (ItemStack item : player.getInventory().getContents()) {
+            addBossArmorPiece(pieces, item, armorKey);
+        }
+        for (ItemStack item : player.getInventory().getArmorContents()) {
+            addBossArmorPiece(pieces, item, armorKey);
+        }
+        addBossArmorPiece(pieces, player.getInventory().getItemInOffHand(), armorKey);
+        return pieces.containsAll(Arrays.asList(
+                "NETHERITE_HELMET", "NETHERITE_CHESTPLATE", "NETHERITE_LEGGINGS", "NETHERITE_BOOTS"));
+    }
+
+    private void addBossArmorPiece(Set<String> pieces, ItemStack item, NamespacedKey armorKey) {
+        if (item != null && !item.getType().isAir() && item.hasItemMeta()
+                && item.getItemMeta().getPersistentDataContainer().has(armorKey, PersistentDataType.BYTE)) {
+            pieces.add(item.getType().name());
         }
     }
 

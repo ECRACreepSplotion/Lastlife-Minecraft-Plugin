@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:wearing_the_fallens_flesh",
+  "display": {
+    "icon": {
+      "id": "minecraft:netherite_boots"
+    },
+    "title": {
+      "text": "Decaying"
+    },
+    "description": {
+      "text": "Still decaying as we speak. Obtain a full set of The Wither's armor",
+      "color": "dark_purple"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 0.0,
+    "y": 2.0
+  },
+  "criteria": {
+    "obtain_wither_armor": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
