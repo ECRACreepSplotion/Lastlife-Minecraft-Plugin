@@ -69,6 +69,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.event.inventory.SmithItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerLoginEvent;
@@ -117,6 +118,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulGatheringAdvancementKey;
     private NamespacedKey theTotemTotemAdvancementKey;
     private NamespacedKey shhhAdvancementKey;
+    private NamespacedKey turningTablesAdvancementKey;
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
     private NamespacedKey soulTableKey;
@@ -149,6 +151,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulGatheringAdvancementKey = new NamespacedKey(this, "soul_gathering");
         theTotemTotemAdvancementKey = new NamespacedKey(this, "the_totem_totem");
         shhhAdvancementKey = new NamespacedKey(this, "shhh");
+        turningTablesAdvancementKey = new NamespacedKey(this, "turning_tables");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         soulTableKey = new NamespacedKey(this, "soul_table");
@@ -159,6 +162,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
         registerAdvancement(theTotemTotemAdvancementKey, "advancements/the_totem_totem.json");
         registerAdvancement(shhhAdvancementKey, "advancements/shhh.json");
+        registerAdvancement(turningTablesAdvancementKey, "advancements/turning_tables.json");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -690,6 +694,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isHeartRemoverRecipe(event.getRecipe())
                 && !isHeartRemoverRecipeInput(event.getInventory().getMatrix())) {
             event.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onSmithSoulTable(SmithItemEvent event) {
+        if (event.getWhoClicked() instanceof Player player && isSoulTable(event.getCurrentItem())) {
+            awardAdvancement(player, turningTablesAdvancementKey);
         }
     }
 

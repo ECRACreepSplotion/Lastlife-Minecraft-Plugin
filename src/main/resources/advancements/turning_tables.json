@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:shhh",
+  "display": {
+    "icon": {
+      "id": "minecraft:crafting_table"
+    },
+    "title": {
+      "text": "Turning Tables"
+    },
+    "description": {
+      "text": "Craft a Soul Table in a Smithing Table.",
+      "color": "dark_purple"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 0.0,
+    "y": 2.0
+  },
+  "criteria": {
+    "craft_soul_table": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
