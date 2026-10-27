@@ -116,6 +116,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey lastLifeRootAdvancementKey;
     private NamespacedKey soulGatheringAdvancementKey;
     private NamespacedKey theTotemTotemAdvancementKey;
+    private NamespacedKey shhhAdvancementKey;
     private NamespacedKey heartRemoverKey;
     private NamespacedKey heartRemoverRecipeKey;
     private NamespacedKey soulTableKey;
@@ -147,6 +148,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         lastLifeRootAdvancementKey = new NamespacedKey(this, "lastlife_root");
         soulGatheringAdvancementKey = new NamespacedKey(this, "soul_gathering");
         theTotemTotemAdvancementKey = new NamespacedKey(this, "the_totem_totem");
+        shhhAdvancementKey = new NamespacedKey(this, "shhh");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
         heartRemoverRecipeKey = new NamespacedKey(this, "heart_remover");
         soulTableKey = new NamespacedKey(this, "soul_table");
@@ -156,6 +158,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
         registerAdvancement(theTotemTotemAdvancementKey, "advancements/the_totem_totem.json");
+        registerAdvancement(shhhAdvancementKey, "advancements/shhh.json");
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -182,6 +185,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshLocatePermission(player);
                     refreshSoulGatheringAdvancement(player);
                     refreshTheTotemTotemAdvancement(player);
+                    refreshShhhAdvancement(player);
                 }), 0L, 20L);
     }
 
@@ -1436,6 +1440,15 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         for (ItemStack item : player.getInventory().getContents()) {
             if (isEvolvedTotem(item)) {
                 awardAdvancement(player, theTotemTotemAdvancementKey);
+                return;
+            }
+        }
+    }
+
+    private void refreshShhhAdvancement(Player player) {
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (item != null && "SILENCE_ARMOR_TRIM_SMITHING_TEMPLATE".equals(item.getType().name())) {
+                awardAdvancement(player, shhhAdvancementKey);
                 return;
             }
         }
