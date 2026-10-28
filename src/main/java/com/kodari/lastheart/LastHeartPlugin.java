@@ -63,6 +63,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageModifier;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EnderDragonChangePhaseEvent;
@@ -90,10 +91,13 @@ import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.SmithingTransformRecipe;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.Keyed;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
 import org.bukkit.util.Vector;
 
 public final class LastHeartPlugin extends JavaPlugin implements Listener, CommandExecutor {
@@ -116,6 +120,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey empoweredDragonKey;
     private NamespacedKey empoweredWitherKey;
     private NamespacedKey empoweredWardenKey;
+    private NamespacedKey empoweredStrengthPotionKey;
+    private NamespacedKey empoweredSpeedPotionKey;
+    private NamespacedKey empoweredInstantHealthPotionKey;
+    private NamespacedKey empoweredBottleKey;
+    private NamespacedKey empoweredSpearKey;
     private NamespacedKey dragonArmorKey;
     private NamespacedKey dragonChestplateKey;
     private NamespacedKey elderGuardianArmorKey;
@@ -168,6 +177,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         empoweredDragonKey = new NamespacedKey(this, "empowered_dragon");
         empoweredWitherKey = new NamespacedKey(this, "empowered_wither");
         empoweredWardenKey = new NamespacedKey(this, "empowered_warden");
+        empoweredStrengthPotionKey = new NamespacedKey(this, "empowered_strength_potion");
+        empoweredSpeedPotionKey = new NamespacedKey(this, "empowered_speed_potion");
+        empoweredInstantHealthPotionKey = new NamespacedKey(this, "empowered_instant_health_potion");
+        empoweredBottleKey = new NamespacedKey(this, "empowered_bottle");
+        empoweredSpearKey = new NamespacedKey(this, "empowered_spear");
         dragonArmorKey = new NamespacedKey(this, "dragon_armor");
         dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
         elderGuardianArmorKey = new NamespacedKey(this, "elder_guardian_armor");
@@ -248,6 +262,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 () -> Bukkit.getOnlinePlayers().forEach(player -> {
                     refreshWardenLeggingsEffects(player);
                     refreshWitherBootsEffects(player);
+                    refreshEmpoweredSpearEffect(player);
                     refreshDragonChestplateEffects(player);
                     refreshElderGuardianHelmetEffects(player);
                     refreshLocatePermission(player);
@@ -540,6 +555,41 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isEmpoweredWither(wither)) {
             event.getDrops().clear();
             event.setDroppedExp(0);
+            boolean droppedAny = false;
+            if (ThreadLocalRandom.current().nextDouble() < 0.20) {
+                event.getDrops().add(createEmpoweredStrengthPotion());
+                droppedAny = true;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < 0.20) {
+                event.getDrops().add(createEmpoweredSpeedPotion());
+                droppedAny = true;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < 0.25) {
+                event.getDrops().add(createEmpoweredInstantHealthPotion());
+                droppedAny = true;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < 0.30) {
+                event.getDrops().add(createEmpoweredBottle());
+                droppedAny = true;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < 0.05) {
+                event.getDrops().add(createEmpoweredSpear());
+                droppedAny = true;
+            }
+            if (!droppedAny) {
+                int fallbackRoll = ThreadLocalRandom.current().nextInt(100);
+                if (fallbackRoll < 20) {
+                    event.getDrops().add(createEmpoweredStrengthPotion());
+                } else if (fallbackRoll < 40) {
+                    event.getDrops().add(createEmpoweredSpeedPotion());
+                } else if (fallbackRoll < 65) {
+                    event.getDrops().add(createEmpoweredInstantHealthPotion());
+                } else if (fallbackRoll < 95) {
+                    event.getDrops().add(createEmpoweredBottle());
+                } else {
+                    event.getDrops().add(createEmpoweredSpear());
+                }
+            }
             Player killer = wither.getKiller();
             if (killer != null) {
                 awardAdvancement(killer, wasntSoHardAdvancementKey);
@@ -722,6 +772,19 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             } else {
                 event.setDamage(damage);
             }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEmpoweredSpearDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)
+                || (event.getCause() != EntityDamageEvent.DamageCause.FALL
+                && event.getCause() != EntityDamageEvent.DamageCause.FLY_INTO_WALL)) {
+            return;
+        }
+        if (isEmpoweredSpear(player.getInventory().getItemInMainHand())
+                || isEmpoweredSpear(player.getInventory().getItemInOffHand())) {
+            event.setCancelled(true);
         }
     }
 
@@ -1023,6 +1086,39 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         refreshMaxHealthNextTick(event.getPlayer());
+        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
+                && isEmpoweredInstantHealthPotion(event.getItem())) {
+            event.setCancelled(true);
+            Player player = event.getPlayer();
+            consumeHeldItem(player, event.getHand());
+            AttributeInstance maxHealth = player.getAttribute(maxHealthAttribute);
+            if (maxHealth != null) {
+                player.setHealth(maxHealth.getValue());
+            }
+            return;
+        }
+        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
+                && isEmpoweredBottle(event.getItem())) {
+            event.setCancelled(true);
+            Player player = event.getPlayer();
+            consumeHeldItem(player, event.getHand());
+            boolean repairedItem = false;
+            for (ItemStack item : player.getInventory().getContents()) {
+                ItemMeta meta = item == null || item.getType().isAir() ? null : item.getItemMeta();
+                if (!hasEnchantment(item, "MENDING", 1)
+                        || !(meta instanceof Damageable damageable)
+                        || damageable.getDamage() <= 0) {
+                    continue;
+                }
+                damageable.setDamage(0);
+                item.setItemMeta(meta);
+                repairedItem = true;
+            }
+            if (!repairedItem) {
+                player.setLevel(player.getLevel() + 50);
+            }
+            return;
+        }
         if (event.getHand() == EquipmentSlot.HAND
                 && event.getAction() == Action.RIGHT_CLICK_BLOCK
                 && event.getClickedBlock() != null
@@ -1374,6 +1470,21 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         player.sendMessage(ChatColor.RED + "You sacrificed one heart for an extra life. This cannot be undone.");
     }
 
+    private void consumeHeldItem(Player player, EquipmentSlot hand) {
+        ItemStack item = hand == EquipmentSlot.HAND
+                ? player.getInventory().getItemInMainHand()
+                : player.getInventory().getItemInOffHand();
+        if (item.getAmount() <= 1) {
+            if (hand == EquipmentSlot.HAND) {
+                player.getInventory().setItemInMainHand(null);
+            } else {
+                player.getInventory().setItemInOffHand(null);
+            }
+        } else {
+            item.setAmount(item.getAmount() - 1);
+        }
+    }
+
     private void registerCustomItemFactories() {
         registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
         registerCustomItem("Death's Head", this::createDeathsHead, "deathshead");
@@ -1381,6 +1492,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("Soul Table", this::createSoulTable, "soultable");
         registerCustomItem("Soul Mace", this::createSoulMace, "soulmace");
+        registerCustomItem("Strength 3 Potion", this::createEmpoweredStrengthPotion, "strength3potion");
+        registerCustomItem("Speed 3 Potion", this::createEmpoweredSpeedPotion, "speed3potion");
+        registerCustomItem("Empowered Instant Health Potion", this::createEmpoweredInstantHealthPotion,
+                "empoweredhealthpotion");
+        registerCustomItem("Empowered Bottle O' Enchanting", this::createEmpoweredBottle,
+                "empoweredbottle");
+        registerCustomItem("Empowered Spear", this::createEmpoweredSpear, "empoweredspear");
         registerCustomItem("V1 Evolved Totem", this::createEvolvedTotem, "evolvedtotem");
         registerCustomItem("The Warden's Netherite Boots",
                 () -> createWardenArmor("NETHERITE_BOOTS", "Boots", false), "wardenboots");
@@ -1476,6 +1594,29 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     .map(potion -> potion.buildPotionEffect(40, 2))
                     .ifPresent(effect -> player.addPotionEffect(effect, false));
         }
+    }
+
+    private void refreshEmpoweredSpearEffect(Player player) {
+        if (!hasEmpoweredSpearInInventory(player)) {
+            return;
+        }
+        XPotion.matchXPotion("STRENGTH")
+                .map(potion -> potion.buildPotionEffect(40, 1))
+                .ifPresent(effect -> player.addPotionEffect(effect, false));
+    }
+
+    private boolean hasEmpoweredSpearInInventory(Player player) {
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (isEmpoweredSpear(item)) {
+                return true;
+            }
+        }
+        for (ItemStack item : player.getInventory().getArmorContents()) {
+            if (isEmpoweredSpear(item)) {
+                return true;
+            }
+        }
+        return isEmpoweredSpear(player.getInventory().getItemInOffHand());
     }
 
     private void refreshDragonChestplateEffects(Player player) {
@@ -1983,6 +2124,79 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return mace;
     }
 
+    private ItemStack createEmpoweredStrengthPotion() {
+        return createEmpoweredPotion("Strength 3 Potion", empoweredStrengthPotionKey, "STRENGTH", 3);
+    }
+
+    private ItemStack createEmpoweredSpeedPotion() {
+        return createEmpoweredPotion("Speed 3 Potion", empoweredSpeedPotionKey, "SPEED", 3);
+    }
+
+    private ItemStack createEmpoweredPotion(String name, NamespacedKey key, String effectName, int amplifier) {
+        ItemStack potion = XMaterial.matchXMaterial("POTION")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Potion is unavailable"));
+        if (!(potion.getItemMeta() instanceof PotionMeta meta)) {
+            throw new IllegalStateException("Potion metadata is unavailable");
+        }
+        PotionEffect effect = XPotion.matchXPotion(effectName)
+                .map(xPotion -> xPotion.buildPotionEffect(3600, amplifier))
+                .orElseThrow(() -> new IllegalStateException(effectName + " is unavailable"));
+        meta.setDisplayName(ChatColor.LIGHT_PURPLE + name);
+        meta.setLore(List.of(ChatColor.GRAY + "A powerful, rare brew."));
+        meta.addCustomEffect(effect, true);
+        meta.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
+        potion.setItemMeta(meta);
+        return potion;
+    }
+
+    private ItemStack createEmpoweredInstantHealthPotion() {
+        ItemStack potion = XMaterial.matchXMaterial("POTION")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Potion is unavailable"));
+        ItemMeta meta = potion.getItemMeta();
+        meta.setDisplayName(ChatColor.RED + "Empowered Instant Health Potion");
+        meta.setLore(List.of(ChatColor.GRAY + "Instantly restores you to full health."));
+        meta.getPersistentDataContainer().set(
+                empoweredInstantHealthPotionKey, PersistentDataType.BYTE, (byte) 1);
+        potion.setItemMeta(meta);
+        return potion;
+    }
+
+    private ItemStack createEmpoweredBottle() {
+        ItemStack bottle = XMaterial.matchXMaterial("EXPERIENCE_BOTTLE")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Bottle o' enchanting is unavailable"));
+        ItemMeta meta = bottle.getItemMeta();
+        meta.setDisplayName(ChatColor.GREEN + "Empowered Bottle O' Enchanting");
+        meta.setLore(List.of(ChatColor.GRAY + "Repairs damaged Mending items, or grants 50 levels."));
+        meta.getPersistentDataContainer().set(empoweredBottleKey, PersistentDataType.BYTE, (byte) 1);
+        bottle.setItemMeta(meta);
+        return bottle;
+    }
+
+    private ItemStack createEmpoweredSpear() {
+        ItemStack spear = XMaterial.matchXMaterial("NETHERITE_SPEAR")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Spear is unavailable"));
+        ItemMeta meta = spear.getItemMeta();
+        meta.setDisplayName(ChatColor.DARK_PURPLE + "Empowered Spear");
+        meta.setLore(List.of(
+                ChatColor.GRAY + "Grants Strength II while in your inventory.",
+                ChatColor.GRAY + "Prevents fall and kinetic damage while held."));
+        meta.getPersistentDataContainer().set(empoweredSpearKey, PersistentDataType.BYTE, (byte) 1);
+        XEnchantment.matchXEnchantment("SHARPNESS")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 9, true));
+        XEnchantment.matchXEnchantment("UNBREAKING")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 5, true));
+        XEnchantment.matchXEnchantment("LUNGE")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 4, true));
+        XEnchantment.matchXEnchantment("FIRE_ASPECT")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 5, true));
+        spear.setItemMeta(meta);
+        return spear;
+    }
+
     private ItemStack createHeartRemover() {
         ItemStack heartRemover = XMaterial.matchXMaterial("WITHER_SKELETON_SKULL")
                 .map(XMaterial::parseItem)
@@ -2288,6 +2502,30 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         return item.getItemMeta().getPersistentDataContainer()
                 .has(soulMaceKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isEmpoweredInstantHealthPotion(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(empoweredInstantHealthPotionKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isEmpoweredBottle(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(empoweredBottleKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isEmpoweredSpear(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(empoweredSpearKey, PersistentDataType.BYTE);
     }
 
     private boolean isHeartRemover(ItemStack item) {
