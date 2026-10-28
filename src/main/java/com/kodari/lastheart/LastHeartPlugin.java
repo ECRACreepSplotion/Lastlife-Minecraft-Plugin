@@ -129,6 +129,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey decayingAdvancementKey;
     private NamespacedKey oceanManAdvancementKey;
     private NamespacedKey hereWeGoAgainAdvancementKey;
+    private NamespacedKey deathIsAtTheDoorAdvancementKey;
     private NamespacedKey feelDizzyAdvancementKey;
     private NamespacedKey iHateYouAdvancementKey;
     private NamespacedKey heartRemoverKey;
@@ -175,6 +176,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         decayingAdvancementKey = new NamespacedKey(this, "decaying");
         oceanManAdvancementKey = new NamespacedKey(this, "ocean_man");
         hereWeGoAgainAdvancementKey = new NamespacedKey(this, "here_we_go_again");
+        deathIsAtTheDoorAdvancementKey = new NamespacedKey(this, "death_is_at_the_door");
         feelDizzyAdvancementKey = new NamespacedKey(this, "i_feel_dizzy");
         iHateYouAdvancementKey = new NamespacedKey(this, "i_hate_you");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
@@ -200,6 +202,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerAdvancement(decayingAdvancementKey, "advancements/decaying.json");
         registerAdvancement(oceanManAdvancementKey, "advancements/ocean_man.json");
         registerAdvancement(hereWeGoAgainAdvancementKey, "advancements/here_we_go_again.json");
+        registerAdvancement(deathIsAtTheDoorAdvancementKey,
+                "advancements/death_is_at_the_door.json");
         registerAdvancement(feelDizzyAdvancementKey, "advancements/i_feel_dizzy.json");
         registerAdvancement(iHateYouAdvancementKey, "advancements/i_hate_you.json");
 
@@ -1450,6 +1454,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
         }
 
+        awardAdvancement(player, deathIsAtTheDoorAdvancementKey);
         Map<Integer, ItemStack> overflow = player.getInventory().addItem(createDeathsHead());
         overflow.values().forEach(item -> player.getWorld()
                 .dropItemNaturally(player.getLocation(), item));

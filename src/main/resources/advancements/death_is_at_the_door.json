@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:wearing_the_fallens_flesh",
+  "display": {
+    "icon": {
+      "id": "minecraft:wither_skeleton_skull"
+    },
+    "title": {
+      "text": "Death Is At The Door"
+    },
+    "description": {
+      "text": "Craft a Death's Head in the Soul Table.",
+      "color": "gray"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 1.0,
+    "y": 0.0
+  },
+  "criteria": {
+    "craft_deaths_head": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
