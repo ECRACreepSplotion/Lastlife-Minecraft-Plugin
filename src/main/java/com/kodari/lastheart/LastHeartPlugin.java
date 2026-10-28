@@ -36,6 +36,7 @@ import org.bukkit.advancement.AdvancementProgress;
 import org.bukkit.boss.BarColor;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.block.Skull;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -45,11 +46,13 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.World;
 import org.bukkit.entity.Evoker;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.ElderGuardian;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Warden;
 import org.bukkit.entity.Wither;
 import org.bukkit.event.EventHandler;
@@ -60,6 +63,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent.DamageModifier;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EnderDragonChangePhaseEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -90,6 +94,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.Keyed;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.util.Vector;
 
 public final class LastHeartPlugin extends JavaPlugin implements Listener, CommandExecutor {
     private static final int MAX_HEARTS = 10;
@@ -109,6 +114,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey demonicInitiatorKey;
     private NamespacedKey demonicInitiatorRecipeKey;
     private NamespacedKey empoweredDragonKey;
+    private NamespacedKey empoweredWitherKey;
+    private NamespacedKey empoweredWardenKey;
     private NamespacedKey dragonArmorKey;
     private NamespacedKey dragonChestplateKey;
     private NamespacedKey elderGuardianArmorKey;
@@ -156,6 +163,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         demonicInitiatorKey = new NamespacedKey(this, "demonic_initiator");
         demonicInitiatorRecipeKey = new NamespacedKey(this, "demonic_initiator");
         empoweredDragonKey = new NamespacedKey(this, "empowered_dragon");
+        empoweredWitherKey = new NamespacedKey(this, "empowered_wither");
+        empoweredWardenKey = new NamespacedKey(this, "empowered_warden");
         dragonArmorKey = new NamespacedKey(this, "dragon_armor");
         dragonChestplateKey = new NamespacedKey(this, "dragon_chestplate");
         elderGuardianArmorKey = new NamespacedKey(this, "elder_guardian_armor");
@@ -506,8 +515,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onWitherDeath(EntityDeathEvent event) {
-        if (!(event.getEntity() instanceof Wither)
-                || ThreadLocalRandom.current().nextDouble() >= 0.30) {
+        if (!(event.getEntity() instanceof Wither wither)) {
+            return;
+        }
+
+        if (isEmpoweredWither(wither)) {
+            event.getDrops().clear();
+            event.setDroppedExp(0);
+            Location deathLocation = wither.getLocation();
+            Block ground = wither.getWorld().getHighestBlockAt(
+                    deathLocation.getBlockX(), deathLocation.getBlockZ());
+            Location wardenLocation = ground.getLocation().add(0.5, 1.0, 0.5);
+            if (wither.getWorld().spawnEntity(wardenLocation, EntityType.WARDEN) instanceof Warden warden) {
+                warden.getPersistentDataContainer().set(empoweredWardenKey,
+                        PersistentDataType.BYTE, (byte) 1);
+            }
+            return;
+        }
+
+        if (ThreadLocalRandom.current().nextDouble() >= 0.30) {
             return;
         }
 
@@ -603,6 +629,163 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             healthAttribute.setBaseValue(healthAttribute.getBaseValue() * multiplier);
             wither.setHealth(healthAttribute.getValue());
         }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onEmpoweredWitherStructurePlace(BlockPlaceEvent event) {
+        if (isDeathsHead(event.getItemInHand())
+                && event.getBlockPlaced().getState() instanceof Skull skull) {
+            skull.getPersistentDataContainer().set(deathsHeadKey, PersistentDataType.BYTE, (byte) 1);
+            skull.update(true, false);
+        }
+
+        Block[] structure = findEmpoweredWitherStructure(event.getBlockPlaced());
+        if (structure == null) {
+            return;
+        }
+
+        Material air = XMaterial.matchXMaterial("AIR")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Air is unavailable"));
+        Location spawnLocation = structure[1].getLocation().add(0.5, 2.0, 0.5);
+        for (Block block : structure) {
+            block.setType(air, false);
+        }
+        if (event.getBlockPlaced().getWorld().spawnEntity(spawnLocation, EntityType.WITHER)
+                instanceof Wither wither) {
+            empowerWither(wither);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEmpoweredBossDamage(EntityDamageByEntityEvent event) {
+        if (event.getEntity() instanceof Player player
+                && event.getDamager() instanceof Wither wither
+                && isEmpoweredWither(wither)) {
+            ignoreResistance(event);
+            event.setCancelled(true);
+            int[] reductions = {20, 6, 6, 8};
+            ItemStack[] armor = player.getInventory().getArmorContents();
+            int reduction = 0;
+            for (int slot = 0; slot < armor.length; slot++) {
+                if (hasEnchantment(armor[slot], "BLAST_PROTECTION", 1)) {
+                    reduction += reductions[slot];
+                }
+            }
+            player.setHealth(Math.max(0.0, player.getHealth() - Math.max(8.0, 48.0 - reduction)));
+            return;
+        }
+
+        if (event.getEntity() instanceof Player player
+                && event.getDamager() instanceof Warden warden
+                && isEmpoweredWarden(warden)) {
+            ignoreResistance(event);
+            if (hasFullProtectionFour(player)) {
+                event.setDamage(18.0);
+            } else {
+                event.setDamage(1_000_000.0);
+            }
+            return;
+        }
+
+        if (event.getDamager() instanceof Projectile projectile
+                && projectile.getShooter() instanceof Wither wither
+                && isEmpoweredWither(wither)) {
+            if (event.getEntity() instanceof Player) {
+                ignoreResistance(event);
+            }
+            event.setDamage(event.getDamage() * 3.0);
+        }
+    }
+
+    private void ignoreResistance(EntityDamageByEntityEvent event) {
+        if (event.isApplicable(DamageModifier.RESISTANCE)) {
+            event.setDamage(DamageModifier.RESISTANCE, 0.0);
+        }
+    }
+
+    private Block[] findEmpoweredWitherStructure(Block placed) {
+        for (int baseY = placed.getY() + 1; baseY >= placed.getY() - 1; baseY--) {
+            for (int baseX = placed.getX() - 1; baseX <= placed.getX() + 1; baseX++) {
+                for (int baseZ = placed.getZ() - 1; baseZ <= placed.getZ() + 1; baseZ++) {
+                    Block center = placed.getWorld().getBlockAt(baseX, baseY, baseZ);
+                    for (boolean alongX : new boolean[]{true, false}) {
+                        int dx = alongX ? 1 : 0;
+                        int dz = alongX ? 0 : 1;
+                        Block[] structure = {
+                                center.getRelative(-dx, 0, -dz),
+                                center,
+                                center.getRelative(dx, 0, dz),
+                                center.getRelative(0, -1, 0),
+                                center.getRelative(-dx, 1, -dz),
+                                center.getRelative(0, 1, 0),
+                                center.getRelative(dx, 1, dz)
+                        };
+                        boolean matches = true;
+                        for (int index = 0; index < 4; index++) {
+                            if (!"NETHERITE_BLOCK".equals(structure[index].getType().name())) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        for (int index = 4; matches && index < structure.length; index++) {
+                            if (!isDeathsHeadBlock(structure[index])) {
+                                matches = false;
+                            }
+                        }
+                        if (matches) {
+                            return structure;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private void empowerWither(Wither wither) {
+        wither.getPersistentDataContainer().set(empoweredWitherKey, PersistentDataType.BYTE, (byte) 1);
+        double environmentMultiplier = switch (wither.getWorld().getEnvironment().name()) {
+            case "NORMAL" -> 2.0;
+            case "NETHER" -> 5.0;
+            default -> 1.0;
+        };
+        AttributeInstance healthAttribute = wither.getAttribute(maxHealthAttribute);
+        if (healthAttribute != null) {
+            healthAttribute.setBaseValue(healthAttribute.getBaseValue() * 10.0 / environmentMultiplier);
+            wither.setHealth(healthAttribute.getValue());
+        }
+        XAttribute.of("movement_speed")
+                .map(XAttribute::get)
+                .map(wither::getAttribute)
+                .ifPresent(speedAttribute -> speedAttribute.setBaseValue(speedAttribute.getBaseValue() * 2.0));
+
+        int[] taskId = new int[1];
+        taskId[0] = Bukkit.getScheduler().runTaskTimer(this, () -> {
+            if (!wither.isValid() || wither.isDead()) {
+                Bukkit.getScheduler().cancelTask(taskId[0]);
+                return;
+            }
+            Player target = null;
+            double closestDistance = Double.MAX_VALUE;
+            for (Player candidate : wither.getWorld().getPlayers()) {
+                if (candidate.isDead() || candidate.getGameMode() == org.bukkit.GameMode.SPECTATOR) {
+                    continue;
+                }
+                double distance = candidate.getLocation().distanceSquared(wither.getLocation());
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    target = candidate;
+                }
+            }
+            wither.setTarget(target);
+            if (target != null) {
+                Vector direction = target.getLocation().toVector().subtract(wither.getLocation().toVector());
+                if (direction.lengthSquared() > 0.01) {
+                    wither.setVelocity(direction.normalize().multiply(0.25));
+                }
+            }
+        }, 1L, 1L).getTaskId();
     }
 
     @EventHandler
@@ -2070,8 +2253,47 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .has(demonicInitiatorKey, PersistentDataType.BYTE);
     }
 
+    private boolean isDeathsHead(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(deathsHeadKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isDeathsHeadBlock(Block block) {
+        return block.getState() instanceof Skull skull
+                && skull.getPersistentDataContainer().has(deathsHeadKey, PersistentDataType.BYTE);
+    }
+
+    private boolean hasEnchantment(ItemStack item, String enchantmentName, int minimumLevel) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return XEnchantment.matchXEnchantment(enchantmentName)
+                .map(enchantment -> item.getItemMeta().getEnchantLevel(enchantment.getEnchant()) >= minimumLevel)
+                .orElse(false);
+    }
+
+    private boolean hasFullProtectionFour(Player player) {
+        for (ItemStack armorPiece : player.getInventory().getArmorContents()) {
+            if (!hasEnchantment(armorPiece, "PROTECTION", 4)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private boolean isEmpoweredDragon(EnderDragon dragon) {
         return dragon.getPersistentDataContainer().has(empoweredDragonKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isEmpoweredWither(Wither wither) {
+        return wither.getPersistentDataContainer().has(empoweredWitherKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isEmpoweredWarden(Warden warden) {
+        return warden.getPersistentDataContainer().has(empoweredWardenKey, PersistentDataType.BYTE);
     }
 
     private void refreshMaxHealthNextTick(Player player) {
