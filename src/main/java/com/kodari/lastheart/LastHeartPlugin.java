@@ -691,10 +691,40 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (event.getDamager() instanceof Projectile projectile
                 && projectile.getShooter() instanceof Wither wither
                 && isEmpoweredWither(wither)) {
-            if (event.getEntity() instanceof Player) {
-                ignoreResistance(event);
+            double damage = event.getDamage() * 3.0;
+            if (event.getEntity() instanceof Player player) {
+                damage -= empoweredWitherBlastProtectionReduction(player);
+                event.setDamage(Math.max(0.0, damage));
+                ignoreEmpoweredWitherMitigation(event);
+            } else {
+                event.setDamage(damage);
             }
-            event.setDamage(event.getDamage() * 3.0);
+        }
+    }
+
+    private int empoweredWitherBlastProtectionReduction(Player player) {
+        int[] reductions = {20, 6, 6, 8};
+        ItemStack[] armor = player.getInventory().getArmorContents();
+        int reduction = 0;
+        for (int slot = 0; slot < armor.length; slot++) {
+            if (hasEnchantment(armor[slot], "BLAST_PROTECTION", 1)) {
+                reduction += reductions[slot];
+            }
+        }
+        return reduction;
+    }
+
+    private void ignoreEmpoweredWitherMitigation(EntityDamageByEntityEvent event) {
+        for (DamageModifier modifier : new DamageModifier[]{
+                DamageModifier.HARD_HAT,
+                DamageModifier.BLOCKING,
+                DamageModifier.ARMOR,
+                DamageModifier.RESISTANCE,
+                DamageModifier.MAGIC
+        }) {
+            if (event.isApplicable(modifier)) {
+                event.setDamage(modifier, 0.0);
+            }
         }
     }
 
