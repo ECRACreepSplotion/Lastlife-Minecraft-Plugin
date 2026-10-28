@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:summoning_lucifer",
+  "display": {
+    "icon": {
+      "id": "minecraft:wither_skeleton_skull"
+    },
+    "title": {
+      "text": "Wasn't So Hard"
+    },
+    "description": {
+      "text": "Kill the Empowered Wither.",
+      "color": "gray"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 2.0,
+    "y": 1.0
+  },
+  "criteria": {
+    "kill_empowered_wither": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

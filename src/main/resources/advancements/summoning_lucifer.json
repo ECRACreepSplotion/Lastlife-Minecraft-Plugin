@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:death_is_at_the_door",
+  "display": {
+    "icon": {
+      "id": "minecraft:netherite_block"
+    },
+    "title": {
+      "text": "Summoning Lucifer"
+    },
+    "description": {
+      "text": "Summon the Empowered Wither using four Netherite Blocks and three Death's Heads.",
+      "color": "gray"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 2.0,
+    "y": 0.0
+  },
+  "criteria": {
+    "summon_empowered_wither": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

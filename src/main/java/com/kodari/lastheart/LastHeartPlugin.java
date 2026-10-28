@@ -137,6 +137,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey oceanManAdvancementKey;
     private NamespacedKey hereWeGoAgainAdvancementKey;
     private NamespacedKey deathIsAtTheDoorAdvancementKey;
+    private NamespacedKey summoningLuciferAdvancementKey;
+    private NamespacedKey wasntSoHardAdvancementKey;
+    private NamespacedKey psstHesOverThereAdvancementKey;
     private NamespacedKey feelDizzyAdvancementKey;
     private NamespacedKey iHateYouAdvancementKey;
     private NamespacedKey heartRemoverKey;
@@ -186,6 +189,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         oceanManAdvancementKey = new NamespacedKey(this, "ocean_man");
         hereWeGoAgainAdvancementKey = new NamespacedKey(this, "here_we_go_again");
         deathIsAtTheDoorAdvancementKey = new NamespacedKey(this, "death_is_at_the_door");
+        summoningLuciferAdvancementKey = new NamespacedKey(this, "summoning_lucifer");
+        wasntSoHardAdvancementKey = new NamespacedKey(this, "wasnt_so_hard");
+        psstHesOverThereAdvancementKey = new NamespacedKey(this, "psst_hes_over_there");
         feelDizzyAdvancementKey = new NamespacedKey(this, "i_feel_dizzy");
         iHateYouAdvancementKey = new NamespacedKey(this, "i_hate_you");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
@@ -213,6 +219,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerAdvancement(hereWeGoAgainAdvancementKey, "advancements/here_we_go_again.json");
         registerAdvancement(deathIsAtTheDoorAdvancementKey,
                 "advancements/death_is_at_the_door.json");
+        registerAdvancement(summoningLuciferAdvancementKey,
+                "advancements/summoning_lucifer.json");
+        registerAdvancement(wasntSoHardAdvancementKey,
+                "advancements/wasnt_so_hard.json");
+        registerAdvancement(psstHesOverThereAdvancementKey,
+                "advancements/psst_hes_over_there.json");
         registerAdvancement(feelDizzyAdvancementKey, "advancements/i_feel_dizzy.json");
         registerAdvancement(iHateYouAdvancementKey, "advancements/i_hate_you.json");
 
@@ -313,8 +325,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onWardenDeath(EntityDeathEvent event) {
-        if (!(event.getEntity() instanceof Warden)
-                || ThreadLocalRandom.current().nextDouble() >= 0.15) {
+        if (!(event.getEntity() instanceof Warden warden)) {
+            return;
+        }
+
+        if (isEmpoweredWarden(warden) && warden.getKiller() != null) {
+            awardAdvancement(warden.getKiller(), psstHesOverThereAdvancementKey);
+        }
+        if (ThreadLocalRandom.current().nextDouble() >= 0.15) {
             return;
         }
 
@@ -522,6 +540,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isEmpoweredWither(wither)) {
             event.getDrops().clear();
             event.setDroppedExp(0);
+            Player killer = wither.getKiller();
+            if (killer != null) {
+                awardAdvancement(killer, wasntSoHardAdvancementKey);
+            }
             Location deathLocation = wither.getLocation();
             Block ground = wither.getWorld().getHighestBlockAt(
                     deathLocation.getBlockX(), deathLocation.getBlockZ());
@@ -654,6 +676,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (event.getBlockPlaced().getWorld().spawnEntity(spawnLocation, EntityType.WITHER)
                 instanceof Wither wither) {
             empowerWither(wither);
+            awardAdvancement(event.getPlayer(), summoningLuciferAdvancementKey);
         }
     }
 

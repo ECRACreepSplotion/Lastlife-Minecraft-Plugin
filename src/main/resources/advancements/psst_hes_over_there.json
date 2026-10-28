@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:wasnt_so_hard",
+  "display": {
+    "icon": {
+      "id": "minecraft:warden_spawn_egg"
+    },
+    "title": {
+      "text": "PSST! He's Over There"
+    },
+    "description": {
+      "text": "Kill the Empowered Wither's Warden guardian.",
+      "color": "gray"
+    },
+    "frame": "challenge",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "x": 2.0,
+    "y": 2.0
+  },
+  "criteria": {
+    "kill_empowered_warden": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
