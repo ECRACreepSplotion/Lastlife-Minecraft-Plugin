@@ -136,6 +136,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulTableKey;
     private NamespacedKey soulTableRecipeKey;
     private NamespacedKey soulMaceKey;
+    private NamespacedKey deathsHeadKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
     private final List<String> customItemNames = new ArrayList<>();
@@ -181,6 +182,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulTableKey = new NamespacedKey(this, "soul_table");
         soulTableRecipeKey = new NamespacedKey(this, "soul_table_recipe");
         soulMaceKey = new NamespacedKey(this, "soul_mace");
+        deathsHeadKey = new NamespacedKey(this, "deaths_head");
         registerCustomItemFactories();
         registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
@@ -684,7 +686,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 holder.transitioning = true;
                 openSoulTable(player, holder.grid, 1 - holder.page);
             } else if (event.getRawSlot() == 53) {
-                craftSoulMace(player, holder);
+                int deathsHeadRecipe = findDeathsHeadRecipe(holder.grid);
+                if (deathsHeadRecipe >= 0) {
+                    craftDeathsHead(player, holder, deathsHeadRecipe);
+                } else {
+                    craftSoulMace(player, holder);
+                }
             } else {
                 int gridSlot = holder.gridSlot(event.getRawSlot());
                 if (gridSlot >= 0 && (event.isLeftClick() || event.isRightClick())) {
@@ -1129,6 +1136,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private void registerCustomItemFactories() {
         registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
+        registerCustomItem("Death's Head", this::createDeathsHead, "deathshead");
         registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("Soul Table", this::createSoulTable, "soultable");
@@ -1341,6 +1349,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 holder.page == 0 ? ChatColor.AQUA + "View rows 6-9" : ChatColor.AQUA + "View rows 1-5"));
         if (isSoulMaceRecipe(holder.grid)) {
             holder.inventory.setItem(53, createSoulMace());
+        } else if (findDeathsHeadRecipe(holder.grid) >= 0) {
+            holder.inventory.setItem(53, createDeathsHead());
         } else {
             holder.inventory.setItem(53, createSoulTableButton("BARRIER",
                     ChatColor.RED + "Complete the 9x9 recipe"));
@@ -1428,6 +1438,64 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         renderSoulTable(holder);
     }
 
+    private void craftDeathsHead(Player player, SoulTableHolder holder, int recipeStart) {
+        for (int row = 0; row < 5; row++) {
+            for (int column = 0; column < 5; column++) {
+                int slot = recipeStart + row * 9 + column;
+                ItemStack ingredient = holder.grid[slot];
+                ingredient.setAmount(ingredient.getAmount() - 1);
+                if (ingredient.getAmount() <= 0) {
+                    holder.grid[slot] = null;
+                }
+            }
+        }
+
+        Map<Integer, ItemStack> overflow = player.getInventory().addItem(createDeathsHead());
+        overflow.values().forEach(item -> player.getWorld()
+                .dropItemNaturally(player.getLocation(), item));
+        renderSoulTable(holder);
+    }
+
+    private int findDeathsHeadRecipe(ItemStack[] grid) {
+        if (grid.length != 81) {
+            return -1;
+        }
+        for (int topRow = 0; topRow <= 4; topRow++) {
+            for (int leftColumn = 0; leftColumn <= 4; leftColumn++) {
+                boolean matches = true;
+                for (int row = 0; row < 5 && matches; row++) {
+                    for (int column = 0; column < 5; column++) {
+                        int slot = (topRow + row) * 9 + leftColumn + column;
+                        if (!isDeathsHeadIngredient(grid[slot], row, column)) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                }
+                if (matches) {
+                    return topRow * 9 + leftColumn;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private boolean isDeathsHeadIngredient(ItemStack item, int row, int column) {
+        if (isEmpty(item)) {
+            return false;
+        }
+        if (column == 2) {
+            if (row == 2) {
+                return "SCULK_CATALYST".equals(item.getType().name());
+            }
+            return isDemonicInitiator(item);
+        }
+        if (column == 0 || column == 4 || row == 0 || row == 4) {
+            return isSoulFragment(item);
+        }
+        return isHeartRemover(item);
+    }
+
     private boolean isSoulMaceRecipe(ItemStack[] grid) {
         if (grid.length != 81) {
             return false;
@@ -1474,6 +1542,17 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
         initiator.setItemMeta(meta);
         return initiator;
+    }
+
+    private ItemStack createDeathsHead() {
+        ItemStack head = XMaterial.matchXMaterial("WITHER_SKELETON_SKULL")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Wither skeleton skull is unavailable"));
+        ItemMeta meta = head.getItemMeta();
+        meta.setDisplayName(ChatColor.RED + "Death's Head");
+        meta.getPersistentDataContainer().set(deathsHeadKey, PersistentDataType.BYTE, (byte) 1);
+        head.setItemMeta(meta);
+        return head;
     }
 
     private ItemStack createSoulFragment() {
