@@ -27,8 +27,7 @@ commands:
     permission: lastlife.locateitem
   market:
     description: Opens the gold stock market.
-    usage: /market
-    permission: lastlife.market
+    usage: /market [edit]
 permissions:
   lastlife.unban:
     description: Allows unbanning players death-banned at ten hearts.
@@ -48,3 +47,6 @@ permissions:
   lastlife.market:
     description: Allows opening the stock market when a market permission is configured.
     default: true
+  lastlife.market.edit:
+    description: Allows editing stock prices, buy taxes, and player share holdings.
+    default: op

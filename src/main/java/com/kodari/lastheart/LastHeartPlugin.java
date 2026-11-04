@@ -164,6 +164,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey deathsHeadKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
+    private final Map<UUID, String> marketEditStockSelections = new ConcurrentHashMap<>();
+    private final Set<UUID> marketEditSessions = ConcurrentHashMap.newKeySet();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
     private final List<String> customItemNames = new ArrayList<>();
 
@@ -333,6 +336,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onMarketPurchaseChat(AsyncPlayerChatEvent event) {
         UUID playerId = event.getPlayer().getUniqueId();
+        if (pendingMarketEdits.containsKey(playerId)) {
+            return;
+        }
         PendingMarketPurchase pending = pendingMarketPurchases.get(playerId);
         if (pending == null) {
             return;
@@ -362,6 +368,153 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             } catch (NumberFormatException exception) {
                 player.sendMessage(ChatColor.RED + "Enter a whole number from 1 to 64, or type cancel.");
                 openGoldStockDetail(player, pending.stockId, pending.page);
+            }
+        });
+    }
+
+    @EventHandler
+    public void onMarketEditChat(AsyncPlayerChatEvent event) {
+        UUID playerId = event.getPlayer().getUniqueId();
+        PendingMarketEdit pending = pendingMarketEdits.get(playerId);
+        String message = event.getMessage();
+        boolean cancel = message.trim().equalsIgnoreCase("cancel confirm");
+        boolean crash = message.trim().equalsIgnoreCase("crash this stock");
+        if (pending == null && crash && marketEditSessions.contains(playerId)
+                && marketEditStockSelections.containsKey(playerId)) {
+            event.setCancelled(true);
+            Bukkit.getScheduler().runTask(this, () -> {
+                Player player = Bukkit.getPlayer(playerId);
+                if (player == null || !marketEditSessions.contains(playerId)) {
+                    return;
+                }
+                if (!player.hasPermission("lastlife.market.edit")) {
+                    marketEditStockSelections.remove(playerId);
+                    marketEditSessions.remove(playerId);
+                    player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
+                    return;
+                }
+                String stockId = marketEditStockSelections.get(playerId);
+                if (stockId == null || !marketData.isConfigurationSection("stocks." + stockId)) {
+                    marketEditStockSelections.remove(playerId);
+                    player.sendMessage(ChatColor.RED + "That stock is no longer available.");
+                    openGoldStocks(player, 0, true);
+                    return;
+                }
+                String stockName = marketData.getString("stocks." + stockId + ".name", stockId);
+                double price = marketData.getDouble("stocks." + stockId + ".price", 1.0);
+                marketEditStockSelections.remove(playerId);
+                declareGoldStockBankrupt(stockId, price, 0.0);
+                player.sendMessage(ChatColor.RED + "You manually crashed " + stockName
+                        + ". The stock and all its shares have been removed.");
+                openGoldStocks(player, 0, true);
+            });
+            return;
+        }
+        if (pending == null && !(cancel && marketEditSessions.contains(playerId))) {
+            return;
+        }
+
+        event.setCancelled(true);
+        Bukkit.getScheduler().runTask(this, () -> {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player == null || !marketEditSessions.contains(playerId)) {
+                return;
+            }
+            if (cancel) {
+                pendingMarketEdits.remove(playerId);
+                marketEditStockSelections.remove(playerId);
+                marketEditSessions.remove(playerId);
+                player.sendMessage(ChatColor.YELLOW + "Market editing cancelled.");
+                openMarketSelector(player);
+                return;
+            }
+            if (pending == null || pendingMarketEdits.get(playerId) != pending) {
+                return;
+            }
+            if (!player.hasPermission("lastlife.market.edit")) {
+                pendingMarketEdits.remove(playerId);
+                marketEditSessions.remove(playerId);
+                player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
+                return;
+            }
+            if (!marketData.isConfigurationSection("stocks." + pending.stockId)) {
+                pendingMarketEdits.remove(playerId);
+                player.sendMessage(ChatColor.RED + "That stock is no longer available.");
+                openGoldStocks(player, pending.page, true);
+                return;
+            }
+
+            switch (pending.step) {
+                case SHARE_PRICE -> {
+                    try {
+                        double price = Double.parseDouble(message.trim());
+                        if (!Double.isFinite(price) || price <= 0.0) {
+                            throw new NumberFormatException();
+                        }
+                        marketData.set("stocks." + pending.stockId + ".price", price);
+                        pendingMarketEdits.remove(playerId);
+                        saveMarketData();
+                        player.sendMessage(ChatColor.GREEN + "Share price set to "
+                                + formatGoldPrice(price) + " gold.");
+                        openGoldStockEditOptions(player, pending.stockId, pending.page);
+                    } catch (NumberFormatException exception) {
+                        player.sendMessage(ChatColor.RED + "Enter a positive number for the share price, or type cancel confirm.");
+                    }
+                }
+                case BUY_TAX -> {
+                    try {
+                        double taxPercent = Double.parseDouble(message.trim());
+                        if (!Double.isFinite(taxPercent) || taxPercent < 0.0) {
+                            throw new NumberFormatException();
+                        }
+                        marketData.set("stocks." + pending.stockId + ".tax_percent", taxPercent);
+                        pendingMarketEdits.remove(playerId);
+                        saveMarketData();
+                        player.sendMessage(ChatColor.GREEN + "Buy tax set to "
+                                + formatGoldPrice(taxPercent) + "%.");
+                        openGoldStockEditOptions(player, pending.stockId, pending.page);
+                    } catch (NumberFormatException exception) {
+                        player.sendMessage(ChatColor.RED + "Enter a non-negative number for the buy tax, or type cancel confirm.");
+                    }
+                }
+                case PLAYER_NAME -> {
+                    OfflinePlayer target = findPlayer(message.trim());
+                    if (target == null) {
+                        player.sendMessage(ChatColor.RED + "That player has not joined this server before. Enter another username, or type cancel confirm.");
+                        return;
+                    }
+                    String targetName = target.getName() == null ? message.trim() : target.getName();
+                    pendingMarketEdits.put(playerId, new PendingMarketEdit(pending.stockId, pending.page,
+                            MarketEditStep.SHARE_AMOUNT, target.getUniqueId(), targetName));
+                    player.sendMessage(ChatColor.YELLOW + "Enter the number of shares " + targetName
+                            + " should own (0 or greater), or type cancel confirm.");
+                }
+                case SHARE_AMOUNT -> {
+                    try {
+                        int amount = Integer.parseInt(message.trim());
+                        if (amount < 0 || pending.targetPlayerId == null) {
+                            throw new NumberFormatException();
+                        }
+                        String playerPath = "players." + pending.targetPlayerId;
+                        marketData.set(playerPath + ".holdings." + pending.stockId, amount);
+                        String lotsPath = playerPath + ".share_lots." + pending.stockId;
+                        if (amount == 0) {
+                            marketData.set(lotsPath, null);
+                        } else {
+                            double price = marketData.getDouble("stocks." + pending.stockId + ".price", 1.0);
+                            marketData.set(lotsPath, List.of(amount + "|" + Double.toString(price)
+                                    + "|" + Double.toString(price * amount)));
+                        }
+                        pendingMarketEdits.remove(playerId);
+                        saveMarketData();
+                        player.sendMessage(ChatColor.GREEN + pending.targetPlayerName + " now owns "
+                                + amount + " share(s) of "
+                                + marketData.getString("stocks." + pending.stockId + ".name", pending.stockId) + ".");
+                        openGoldStockEditOptions(player, pending.stockId, pending.page);
+                    } catch (NumberFormatException exception) {
+                        player.sendMessage(ChatColor.RED + "Enter a whole number of 0 or greater, or type cancel confirm.");
+                    }
+                }
             }
         });
     }
@@ -1043,21 +1196,45 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             if (!(event.getWhoClicked() instanceof Player player)) {
                 return;
             }
+            if (holder.editMode && !player.hasPermission("lastlife.market.edit")) {
+                pendingMarketEdits.remove(player.getUniqueId());
+                marketEditSessions.remove(player.getUniqueId());
+                player.closeInventory();
+                player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
+                return;
+            }
             if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 13) {
-                openGoldStocks(player);
+                openGoldStocks(player, 0, holder.editMode);
             } else if (holder.view == MarketView.STOCK_SELECT) {
                 if (event.getRawSlot() == 22) {
-                    openMarketSelector(player);
+                    openMarketSelector(player, holder.editMode);
                 } else if (event.getRawSlot() == 18 && holder.page > 0) {
-                    openGoldStocks(player, holder.page - 1);
+                    openGoldStocks(player, holder.page - 1, holder.editMode);
                 } else if (event.getRawSlot() == 26
                         && (holder.page + 1) * 7 < getGoldStockIds().size()) {
-                    openGoldStocks(player, holder.page + 1);
+                    openGoldStocks(player, holder.page + 1, holder.editMode);
                 } else {
                     String stockId = holder.stockSlots.get(event.getRawSlot());
                     if (stockId != null) {
-                        openGoldStockDetail(player, stockId, holder.page);
+                        if (holder.editMode) {
+                            openGoldStockEditOptions(player, stockId, holder.page);
+                        } else {
+                            openGoldStockDetail(player, stockId, holder.page);
+                        }
                     }
+                }
+            } else if (holder.view == MarketView.STOCK_EDIT_OPTIONS && holder.stockId != null) {
+                if (event.getRawSlot() == 22) {
+                    openGoldStocks(player, holder.page, true);
+                } else if (event.getRawSlot() == 11) {
+                    promptMarketEdit(player, holder.stockId, holder.page, MarketEditStep.SHARE_PRICE,
+                            "Enter the new share price in gold.");
+                } else if (event.getRawSlot() == 13) {
+                    promptMarketEdit(player, holder.stockId, holder.page, MarketEditStep.BUY_TAX,
+                            "Enter the new buy tax percentage. Values above 100% are allowed.");
+                } else if (event.getRawSlot() == 15) {
+                    promptMarketEdit(player, holder.stockId, holder.page, MarketEditStep.PLAYER_NAME,
+                            "Enter the username of a player who has joined this server before.");
                 }
             } else if (holder.view == MarketView.STOCK_DETAIL && holder.stockId != null) {
                 if (event.getRawSlot() == 22) {
@@ -1295,7 +1472,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        PermissionAttachment attachment = locatePermissionAttachments.remove(event.getPlayer().getUniqueId());
+        UUID playerId = event.getPlayer().getUniqueId();
+        pendingMarketEdits.remove(playerId);
+        marketEditStockSelections.remove(playerId);
+        marketEditSessions.remove(playerId);
+        PermissionAttachment attachment = locatePermissionAttachments.remove(playerId);
         if (attachment != null) {
             event.getPlayer().removeAttachment(attachment);
         }
@@ -1368,7 +1549,15 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         switch (command.getName().toLowerCase()) {
-            case "market" -> openMarket(sender);
+            case "market" -> {
+                if (args.length == 0) {
+                    openMarket(sender);
+                } else if (args.length == 1 && args[0].equalsIgnoreCase("edit")) {
+                    openMarketEdit(sender);
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Usage: /market [edit]");
+                }
+            }
             case "heartunban" -> unbanPlayer(sender, args);
             case "sethearts" -> setPlayerHearts(sender, args);
             case "checkhearts" -> checkPlayerHearts(sender, args);
@@ -1387,12 +1576,34 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             return;
         }
 
+        marketEditSessions.remove(player.getUniqueId());
+        pendingMarketEdits.remove(player.getUniqueId());
+
+        if (!player.hasPermission("lastlife.market")) {
+            player.sendMessage(ChatColor.RED + "You do not have permission to use the market.");
+            return;
+        }
         String permission = getConfig().getString("market.permission", "");
         if (permission != null && !permission.isBlank() && !player.hasPermission(permission)) {
             player.sendMessage(ChatColor.RED + "You do not have permission to use the market.");
             return;
         }
         openMarketSelector(player);
+    }
+
+    private void openMarketEdit(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage("Only players can edit the market.");
+            return;
+        }
+        if (!player.hasPermission("lastlife.market.edit")) {
+            player.sendMessage(ChatColor.RED + "You do not have permission to edit the market.");
+            return;
+        }
+        pendingMarketPurchases.remove(player.getUniqueId());
+        pendingMarketEdits.remove(player.getUniqueId());
+        marketEditSessions.add(player.getUniqueId());
+        openMarketSelector(player, true);
     }
 
     private void initializeMarketStocks() {
@@ -1591,7 +1802,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void openMarketSelector(Player player) {
-        MarketMenuHolder holder = new MarketMenuHolder(MarketView.MARKET_SELECT, null, 0);
+        openMarketSelector(player, false);
+    }
+
+    private void openMarketSelector(Player player, boolean editMode) {
+        marketEditStockSelections.remove(player.getUniqueId());
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.MARKET_SELECT, null, 0, editMode);
         holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_GREEN + "Markets");
         holder.inventory.setItem(13, createMarketItem("GOLD_INGOT", ChatColor.GOLD + "Gold Market",
                 ChatColor.GRAY + "Trade shares priced in gold ingots.",
@@ -1604,6 +1820,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void openGoldStocks(Player player, int requestedPage) {
+        openGoldStocks(player, requestedPage, false);
+    }
+
+    private void openGoldStocks(Player player, int requestedPage, boolean editMode) {
+        marketEditStockSelections.remove(player.getUniqueId());
         List<String> stockIds = getGoldStockIds();
         stockIds.sort((left, right) -> {
             boolean leftOwned = getGoldShares(player, left) > 0;
@@ -1615,7 +1836,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         });
         int maxPage = Math.max(0, (stockIds.size() - 1) / 7);
         int page = Math.max(0, Math.min(requestedPage, maxPage));
-        MarketMenuHolder holder = new MarketMenuHolder(MarketView.STOCK_SELECT, null, page);
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.STOCK_SELECT, null, page, editMode);
         holder.inventory = Bukkit.createInventory(holder, 27,
                 ChatColor.DARK_GREEN + "Gold Market " + (page + 1) + "/" + (maxPage + 1));
         int[] slots = {10, 11, 12, 13, 14, 15, 16};
@@ -1645,6 +1866,33 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         holder.inventory.setItem(22, createMarketItem("BARRIER", ChatColor.YELLOW + "Back to markets"));
         player.openInventory(holder.inventory);
+    }
+
+    private void openGoldStockEditOptions(Player player, String stockId, int page) {
+        String path = "stocks." + stockId;
+        if (!marketData.isConfigurationSection(path)) {
+            openGoldStocks(player, page, true);
+            return;
+        }
+        marketEditStockSelections.put(player.getUniqueId(), stockId);
+        String stockName = marketData.getString(path + ".name", stockId);
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.STOCK_EDIT_OPTIONS, stockId, page, true);
+        holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_GREEN + "Edit " + stockName);
+        holder.inventory.setItem(11, createMarketItem("EMERALD", ChatColor.GREEN + "Share Price",
+                ChatColor.GRAY + "Set this stock's share price in chat."));
+        holder.inventory.setItem(13, createMarketItem("GOLD_INGOT", ChatColor.GOLD + "Buy Tax",
+                ChatColor.GRAY + "Set any non-negative tax percentage."));
+        holder.inventory.setItem(15, createMarketItem("PAPER", ChatColor.YELLOW + "Shares Owned",
+                ChatColor.GRAY + "Set a player's total shares in this stock."));
+        holder.inventory.setItem(22, createMarketItem("ARROW", ChatColor.YELLOW + "Back to gold stocks"));
+        player.openInventory(holder.inventory);
+    }
+
+    private void promptMarketEdit(Player player, String stockId, int page, MarketEditStep step, String prompt) {
+        pendingMarketEdits.put(player.getUniqueId(),
+                new PendingMarketEdit(stockId, page, step, null, null));
+        player.closeInventory();
+        player.sendMessage(ChatColor.YELLOW + prompt + " Type cancel confirm at any time to stop editing.");
     }
 
     private List<String> getGoldStockPerformanceLore(String stockId) {
@@ -3365,20 +3613,34 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private enum MarketView {
         MARKET_SELECT,
         STOCK_SELECT,
+        STOCK_EDIT_OPTIONS,
         STOCK_DETAIL
+    }
+
+    private enum MarketEditStep {
+        SHARE_PRICE,
+        BUY_TAX,
+        PLAYER_NAME,
+        SHARE_AMOUNT
     }
 
     private final class MarketMenuHolder implements InventoryHolder {
         private final MarketView view;
         private final String stockId;
         private final int page;
+        private final boolean editMode;
         private final Map<Integer, String> stockSlots = new HashMap<>();
         private Inventory inventory;
 
         private MarketMenuHolder(MarketView view, String stockId, int page) {
+            this(view, stockId, page, false);
+        }
+
+        private MarketMenuHolder(MarketView view, String stockId, int page, boolean editMode) {
             this.view = view;
             this.stockId = stockId;
             this.page = page;
+            this.editMode = editMode;
         }
 
         @Override
@@ -3394,6 +3656,23 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         private PendingMarketPurchase(String stockId, int page) {
             this.stockId = stockId;
             this.page = page;
+        }
+    }
+
+    private static final class PendingMarketEdit {
+        private final String stockId;
+        private final int page;
+        private final MarketEditStep step;
+        private final UUID targetPlayerId;
+        private final String targetPlayerName;
+
+        private PendingMarketEdit(String stockId, int page, MarketEditStep step,
+                UUID targetPlayerId, String targetPlayerName) {
+            this.stockId = stockId;
+            this.page = page;
+            this.step = step;
+            this.targetPlayerId = targetPlayerId;
+            this.targetPlayerName = targetPlayerName;
         }
     }
 
