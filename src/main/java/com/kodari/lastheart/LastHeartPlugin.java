@@ -2177,6 +2177,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         double price = marketData.getDouble(path + ".price", 1.0);
         double taxPercent = marketData.getDouble(path + ".tax_percent", 0.1);
+        double subtotal = price * amount;
         int cost = getGoldPurchaseCost(price, amount, taxPercent);
         if (countGoldIngots(player) < cost) {
             player.sendMessage(ChatColor.RED + "You need " + cost + " gold ingot(s) to buy those shares.");
@@ -2188,12 +2189,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         String holdingsPath = "players." + player.getUniqueId() + ".holdings." + stockId;
         List<GoldShareLot> lots = getGoldShareLots(player, stockId);
-        addGoldShareLot(lots, amount, price, cost);
+        addGoldShareLot(lots, amount, price, subtotal);
         int newHolding = getGoldShares(player, stockId) + amount;
         marketData.set(holdingsPath, newHolding);
         saveGoldShareLots(player, stockId, lots);
         marketData.set(path + ".gold_reserve",
-                marketData.getDouble(path + ".gold_reserve", 0.0) + cost);
+                marketData.getDouble(path + ".gold_reserve", 0.0) + subtotal);
         adjustGoldStockPrice(stockId, amount, true);
         saveMarketData();
         player.sendMessage(ChatColor.GREEN + "Bought " + amount + " share(s) for " + cost
