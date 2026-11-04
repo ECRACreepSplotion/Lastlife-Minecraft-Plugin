@@ -1,0 +1,3 @@
+market:
+  # Leave blank to allow everyone, or set a permission node to restrict access.
+  permission: ""

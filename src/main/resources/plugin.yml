@@ -1,5 +1,5 @@
 name: LastLife
-version: 6.1.0
+version: 7.0.0
 main: com.kodari.lastheart.LastHeartPlugin
 api-version: '1.21'
 author: CreepSplotion
@@ -25,6 +25,10 @@ commands:
     description: Locates a generated container containing a naturally generated custom item.
     usage: /locateitem <item name>
     permission: lastlife.locateitem
+  market:
+    description: Opens the gold stock market.
+    usage: /market
+    permission: lastlife.market
 permissions:
   lastlife.unban:
     description: Allows unbanning players death-banned at ten hearts.
@@ -41,3 +45,6 @@ permissions:
   lastlife.locateitem:
     description: Allows locating containers with naturally generated custom items.
     default: op
+  lastlife.market:
+    description: Allows opening the stock market when a market permission is configured.
+    default: true
