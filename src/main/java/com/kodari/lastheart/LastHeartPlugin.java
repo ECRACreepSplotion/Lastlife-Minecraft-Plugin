@@ -379,7 +379,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         String message = event.getMessage();
         boolean cancel = message.trim().equalsIgnoreCase("cancel confirm");
         boolean crash = message.trim().equalsIgnoreCase("crash this stock");
-        if (pending == null && crash && marketEditSessions.contains(playerId)
+        if (crash && marketEditSessions.contains(playerId)
                 && marketEditStockSelections.containsKey(playerId)) {
             event.setCancelled(true);
             Bukkit.getScheduler().runTask(this, () -> {
@@ -388,6 +388,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     return;
                 }
                 if (!player.hasPermission("lastlife.market.edit")) {
+                    pendingMarketEdits.remove(playerId);
                     marketEditStockSelections.remove(playerId);
                     marketEditSessions.remove(playerId);
                     player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
@@ -395,6 +396,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 }
                 String stockId = marketEditStockSelections.get(playerId);
                 if (stockId == null || !marketData.isConfigurationSection("stocks." + stockId)) {
+                    pendingMarketEdits.remove(playerId);
                     marketEditStockSelections.remove(playerId);
                     player.sendMessage(ChatColor.RED + "That stock is no longer available.");
                     openGoldStocks(player, 0, true);
@@ -402,6 +404,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 }
                 String stockName = marketData.getString("stocks." + stockId + ".name", stockId);
                 double price = marketData.getDouble("stocks." + stockId + ".price", 1.0);
+                pendingMarketEdits.remove(playerId);
                 marketEditStockSelections.remove(playerId);
                 declareGoldStockBankrupt(stockId, price, 0.0);
                 player.sendMessage(ChatColor.RED + "You manually crashed " + stockName
