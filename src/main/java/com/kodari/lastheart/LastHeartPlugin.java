@@ -1398,6 +1398,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private void initializeMarketStocks() {
         ConfigurationSection stocks = marketData.getConfigurationSection("stocks");
         if (stocks != null && !stocks.getKeys(false).isEmpty()) {
+            for (String stockId : stocks.getKeys(false)) {
+                String taxPath = "stocks." + stockId + ".tax_percent";
+                if (!marketData.contains(taxPath)) {
+                    marketData.set(taxPath, generateGoldStockTaxPercent());
+                }
+            }
+            saveMarketData();
             return;
         }
         for (int index = 0; index < 9; index++) {
@@ -1436,6 +1443,28 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         marketData.set("stocks." + stockId + ".next_change_at",
                 System.currentTimeMillis() + changeIntervalSeconds * 1000L);
         marketData.set("stocks." + stockId + ".natural_change_scale", random.nextDouble(0.5, 1.51));
+        marketData.set("stocks." + stockId + ".tax_percent", generateGoldStockTaxPercent());
+    }
+
+    private double generateGoldStockTaxPercent() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int roll = random.nextInt(1000);
+        if (roll == 0) {
+            return 100.0;
+        }
+        if (roll < 10) {
+            return random.nextInt(501, 1000) / 10.0;
+        }
+        if (roll < 20) {
+            return random.nextInt(201, 501) / 10.0;
+        }
+        if (roll < 40) {
+            return random.nextInt(101, 201) / 10.0;
+        }
+        if (roll < 100) {
+            return random.nextInt(51, 101) / 10.0;
+        }
+        return random.nextInt(1, 51) / 10.0;
     }
 
     private void simulateMarketTrades() {
@@ -1599,6 +1628,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             List<String> stockLore = new ArrayList<>();
             stockLore.add(ChatColor.GRAY + "Share price: "
                     + formatGoldPrice(marketData.getDouble(path + ".price", 1.0)) + " gold ingots");
+            stockLore.add(ChatColor.GRAY + "Buy tax: "
+                    + formatGoldPrice(marketData.getDouble(path + ".tax_percent", 0.1)) + "%");
             stockLore.add(ChatColor.GRAY + "Shares owned: " + getGoldShares(player, stockId));
             stockLore.addAll(getGoldStockPerformanceLore(stockId));
             stockLore.add(ChatColor.YELLOW + "Click to view this stock");
@@ -1659,6 +1690,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_GREEN + stockName);
         List<String> stockLore = new ArrayList<>();
         stockLore.add(ChatColor.GRAY + "Current price: " + formatGoldPrice(price) + " gold ingots per share");
+        double taxPercent = marketData.getDouble(path + ".tax_percent", 0.1);
+        stockLore.add(ChatColor.GRAY + "Buy tax: " + formatGoldPrice(taxPercent) + "%");
         stockLore.add(ChatColor.GRAY + "You own: " + ownedShares + " share(s)");
         for (GoldShareLot lot : getGoldShareLots(player, stockId)) {
             stockLore.add(ChatColor.YELLOW + String.valueOf(lot.shares) + " share(s) bought at "
@@ -1672,10 +1705,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         int[] buyAmounts = {1, 5, 10, 64};
         for (int index = 0; index < buySlots.length; index++) {
             int amount = buyAmounts[index];
-            int cost = (int) Math.max(1, Math.ceil(price * amount));
+            double subtotal = price * amount;
+            int cost = getGoldPurchaseCost(price, amount, taxPercent);
             holder.inventory.setItem(buySlots[index], createMarketItem("EMERALD",
                     ChatColor.GREEN + "Buy " + amount + " share(s)",
-                    ChatColor.GRAY + "Cost: " + cost + " gold ingot(s)"));
+                    ChatColor.GRAY + "Subtotal: " + formatGoldPrice(subtotal) + " gold",
+                    ChatColor.GRAY + "Tax rate: " + formatGoldPrice(taxPercent) + "%",
+                    ChatColor.GREEN + "Total: " + cost + " gold ingot(s)"));
         }
         holder.inventory.setItem(14, createMarketItem("PAPER", ChatColor.GREEN + "Buy a custom amount",
                 ChatColor.GRAY + "Type a quantity from 1 to 64 in chat."));
@@ -1868,6 +1904,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         overflow.values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
     }
 
+    private int getGoldPurchaseCost(double price, int amount, double taxPercent) {
+        return (int) Math.max(1, Math.ceil(price * amount * (1.0 + taxPercent / 100.0)));
+    }
+
     private void buyGoldShares(Player player, String stockId, int amount) {
         buyGoldShares(player, stockId, amount, 0);
     }
@@ -1885,7 +1925,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             return;
         }
         double price = marketData.getDouble(path + ".price", 1.0);
-        int cost = (int) Math.max(1, Math.ceil(price * amount));
+        double taxPercent = marketData.getDouble(path + ".tax_percent", 0.1);
+        int cost = getGoldPurchaseCost(price, amount, taxPercent);
         if (countGoldIngots(player) < cost) {
             player.sendMessage(ChatColor.RED + "You need " + cost + " gold ingot(s) to buy those shares.");
             return;
@@ -1904,7 +1945,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 marketData.getDouble(path + ".gold_reserve", 0.0) + cost);
         adjustGoldStockPrice(stockId, amount, true);
         saveMarketData();
-        player.sendMessage(ChatColor.GREEN + "Bought " + amount + " share(s) for " + cost + " gold ingot(s).");
+        player.sendMessage(ChatColor.GREEN + "Bought " + amount + " share(s) for " + cost
+                + " gold ingot(s), including " + formatGoldPrice(taxPercent) + "% tax.");
         openGoldStockDetail(player, stockId, page);
     }
 
