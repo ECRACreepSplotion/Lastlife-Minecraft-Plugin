@@ -94,6 +94,7 @@ import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.RecipeChoice;
 import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.SmithingTransformRecipe;
+import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.PotionMeta;
@@ -154,6 +155,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey summoningLuciferAdvancementKey;
     private NamespacedKey wasntSoHardAdvancementKey;
     private NamespacedKey psstHesOverThereAdvancementKey;
+    private NamespacedKey memoriesOrWarningsAdvancementKey;
     private NamespacedKey feelDizzyAdvancementKey;
     private NamespacedKey iHateYouAdvancementKey;
     private NamespacedKey heartRemoverKey;
@@ -216,6 +218,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         summoningLuciferAdvancementKey = new NamespacedKey(this, "summoning_lucifer");
         wasntSoHardAdvancementKey = new NamespacedKey(this, "wasnt_so_hard");
         psstHesOverThereAdvancementKey = new NamespacedKey(this, "psst_hes_over_there");
+        memoriesOrWarningsAdvancementKey = new NamespacedKey(this, "memories_or_warnings");
         feelDizzyAdvancementKey = new NamespacedKey(this, "i_feel_dizzy");
         iHateYouAdvancementKey = new NamespacedKey(this, "i_hate_you");
         heartRemoverKey = new NamespacedKey(this, "heart_remover");
@@ -249,6 +252,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 "advancements/wasnt_so_hard.json");
         registerAdvancement(psstHesOverThereAdvancementKey,
                 "advancements/psst_hes_over_there.json");
+        registerAdvancement(memoriesOrWarningsAdvancementKey,
+                "advancements/memories_or_warnings.json");
         registerAdvancement(feelDizzyAdvancementKey, "advancements/i_feel_dizzy.json");
         registerAdvancement(iHateYouAdvancementKey, "advancements/i_hate_you.json");
 
@@ -293,6 +298,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshDecayingAdvancement(player);
                     refreshOceanManAdvancement(player);
                     refreshIHateYouAdvancement(player);
+                    refreshMemoriesOrWarningsAdvancement(player);
                 }), 0L, 20L);
     }
 
@@ -570,6 +576,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         if (isEmpoweredWarden(warden) && warden.getKiller() != null) {
             awardAdvancement(warden.getKiller(), psstHesOverThereAdvancementKey);
+        }
+        if (isEmpoweredWarden(warden) && ThreadLocalRandom.current().nextDouble() < 0.20) {
+            ItemStack book = XMaterial.matchXMaterial("WRITTEN_BOOK")
+                    .map(XMaterial::parseItem)
+                    .orElse(null);
+            if (book != null && book.getItemMeta() instanceof BookMeta bookMeta) {
+                bookMeta.setTitle("It Knows I'm Here");
+                bookMeta.setAuthor("The Soundless One");
+                bookMeta.setPages(
+                        "It knows i'm here.\nIt always knew I was here.\nIt listens to my quiet steps,\nas I hide behind the shelves.\nIt listens to my quiet heartbeat,\nas I try to calm myself down.\nIt listens to my quiet breathing, as I try to contain it all...",
+                        "It knows i'm here,\nbut it never reveals so.\nIt wanders mindlessly, with no destination in sight.\nIt wanders endlessly, a great display of might.\nIt wanders soundlessly,\nand yet its looking for a fight...",
+                        "It knows i'm here,\nit's territory disturbed.\nIt follows the sound it hears, punishing all within reach.\nIt follows the sound it hears, without a single line of speech.\nIt follows the sound it hears, gone without a peep.",
+                        "It knows i'm here,\nit never knew I was here before.\nI grew too restless, too demanding, and now it searches for more.\nIt may give up, and take a little rest.\nBut before it does it will try its very best.\nIt knows i'm here, and so do the rest.");
+                book.setItemMeta(bookMeta);
+                event.getDrops().add(book);
+            }
         }
         if (ThreadLocalRandom.current().nextDouble() >= 0.15) {
             return;
@@ -3293,6 +3315,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         awardAdvancement(player, lastLifeRootAdvancementKey);
         awardAdvancement(player, soulGatheringAdvancementKey);
+    }
+
+    private void refreshMemoriesOrWarningsAdvancement(Player player) {
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (item != null && "WRITTEN_BOOK".equals(item.getType().name())
+                    && item.getItemMeta() instanceof BookMeta bookMeta
+                    && "It Knows I'm Here".equals(bookMeta.getTitle())
+                    && "The Soundless One".equals(bookMeta.getAuthor())) {
+                awardAdvancement(player, memoriesOrWarningsAdvancementKey);
+                return;
+            }
+        }
     }
 
     private void refreshRiskyResetAdvancement(Player player) {

@@ -1,0 +1,25 @@
+{
+  "parent": "lastlife:psst_hes_over_there",
+  "display": {
+    "icon": {
+      "id": "minecraft:written_book"
+    },
+    "title": {
+      "text": "Memories, or Warnings?"
+    },
+    "description": {
+      "text": "I don't understand this book."
+    },
+    "frame": "challenge",
+    "show_toast": false,
+    "announce_to_chat": false,
+    "hidden": true,
+    "x": 3.0,
+    "y": 2.0
+  },
+  "criteria": {
+    "carry_the_book": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
