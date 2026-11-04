@@ -166,6 +166,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
     private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
     private final Map<UUID, String> marketEditStockSelections = new ConcurrentHashMap<>();
+    private final Map<UUID, MarketType> marketEditMarketSelections = new ConcurrentHashMap<>();
     private final Set<UUID> marketEditSessions = ConcurrentHashMap.newKeySet();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
     private final List<String> customItemNames = new ArrayList<>();
@@ -262,6 +263,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         marketDataFile = new File(getDataFolder(), "market.yml");
         marketData = YamlConfiguration.loadConfiguration(marketDataFile);
         initializeMarketStocks();
+        initializeEnchantedAppleMarketStocks();
         registerDemonicInitiatorRecipe();
         registerHeartRemoverRecipe();
         registerSoulTableRecipe();
@@ -356,7 +358,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
             if (message.equalsIgnoreCase("cancel")) {
                 player.sendMessage(ChatColor.YELLOW + "Market purchase cancelled.");
-                openGoldStockDetail(player, pending.stockId, pending.page);
+                openMarketStockDetail(player, pending.marketType, pending.stockId, pending.page);
                 return;
             }
             try {
@@ -364,10 +366,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 if (amount < 1 || amount > 64) {
                     throw new NumberFormatException();
                 }
-                buyGoldShares(player, pending.stockId, amount, pending.page);
+                buyMarketShares(player, pending.marketType, pending.stockId, amount, pending.page);
             } catch (NumberFormatException exception) {
                 player.sendMessage(ChatColor.RED + "Enter a whole number from 1 to 64, or type cancel.");
-                openGoldStockDetail(player, pending.stockId, pending.page);
+                openMarketStockDetail(player, pending.marketType, pending.stockId, pending.page);
             }
         });
     }
@@ -395,21 +397,26 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     return;
                 }
                 String stockId = marketEditStockSelections.get(playerId);
-                if (stockId == null || !marketData.isConfigurationSection("stocks." + stockId)) {
+                MarketType marketType = marketEditMarketSelections.get(playerId);
+                if (stockId == null || marketType == null
+                        || !marketData.isConfigurationSection(marketStockPath(marketType, stockId))) {
                     pendingMarketEdits.remove(playerId);
                     marketEditStockSelections.remove(playerId);
+                    marketEditMarketSelections.remove(playerId);
                     player.sendMessage(ChatColor.RED + "That stock is no longer available.");
-                    openGoldStocks(player, 0, true);
+                    openMarketStocks(player, marketType == null ? MarketType.GOLD : marketType, 0, true);
                     return;
                 }
-                String stockName = marketData.getString("stocks." + stockId + ".name", stockId);
-                double price = marketData.getDouble("stocks." + stockId + ".price", 1.0);
+                String path = marketStockPath(marketType, stockId);
+                String stockName = marketData.getString(path + ".name", stockId);
+                double price = marketData.getDouble(path + ".price", 1.0);
                 pendingMarketEdits.remove(playerId);
                 marketEditStockSelections.remove(playerId);
-                declareGoldStockBankrupt(stockId, price, 0.0);
+                marketEditMarketSelections.remove(playerId);
+                declareMarketStockBankrupt(marketType, stockId, price, 0.0);
                 player.sendMessage(ChatColor.RED + "You manually crashed " + stockName
                         + ". The stock and all its shares have been removed.");
-                openGoldStocks(player, 0, true);
+                openMarketStocks(player, marketType, 0, true);
             });
             return;
         }
@@ -426,6 +433,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             if (cancel) {
                 pendingMarketEdits.remove(playerId);
                 marketEditStockSelections.remove(playerId);
+                marketEditMarketSelections.remove(playerId);
                 marketEditSessions.remove(playerId);
                 player.sendMessage(ChatColor.YELLOW + "Market editing cancelled.");
                 openMarketSelector(player);
@@ -440,10 +448,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
                 return;
             }
-            if (!marketData.isConfigurationSection("stocks." + pending.stockId)) {
+            String stockPath = marketStockPath(pending.marketType, pending.stockId);
+            if (!marketData.isConfigurationSection(stockPath)) {
                 pendingMarketEdits.remove(playerId);
                 player.sendMessage(ChatColor.RED + "That stock is no longer available.");
-                openGoldStocks(player, pending.page, true);
+                openMarketStocks(player, pending.marketType, pending.page, true);
                 return;
             }
 
@@ -454,12 +463,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                         if (!Double.isFinite(price) || price <= 0.0) {
                             throw new NumberFormatException();
                         }
-                        marketData.set("stocks." + pending.stockId + ".price", price);
+                        marketData.set(stockPath + ".price", price);
                         pendingMarketEdits.remove(playerId);
                         saveMarketData();
                         player.sendMessage(ChatColor.GREEN + "Share price set to "
-                                + formatGoldPrice(price) + " gold.");
-                        openGoldStockEditOptions(player, pending.stockId, pending.page);
+                                + formatGoldPrice(price) + " " + pending.marketType.currencyName + ".");
+                        openMarketStockEditOptions(player, pending.marketType, pending.stockId, pending.page);
                     } catch (NumberFormatException exception) {
                         player.sendMessage(ChatColor.RED + "Enter a positive number for the share price, or type cancel confirm.");
                     }
@@ -470,12 +479,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                         if (!Double.isFinite(taxPercent) || taxPercent < 0.0) {
                             throw new NumberFormatException();
                         }
-                        marketData.set("stocks." + pending.stockId + ".tax_percent", taxPercent);
+                        marketData.set(stockPath + ".tax_percent", taxPercent);
                         pendingMarketEdits.remove(playerId);
                         saveMarketData();
                         player.sendMessage(ChatColor.GREEN + "Buy tax set to "
                                 + formatGoldPrice(taxPercent) + "%.");
-                        openGoldStockEditOptions(player, pending.stockId, pending.page);
+                        openMarketStockEditOptions(player, pending.marketType, pending.stockId, pending.page);
                     } catch (NumberFormatException exception) {
                         player.sendMessage(ChatColor.RED + "Enter a non-negative number for the buy tax, or type cancel confirm.");
                     }
@@ -487,8 +496,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                         return;
                     }
                     String targetName = target.getName() == null ? message.trim() : target.getName();
-                    pendingMarketEdits.put(playerId, new PendingMarketEdit(pending.stockId, pending.page,
-                            MarketEditStep.SHARE_AMOUNT, target.getUniqueId(), targetName));
+                    pendingMarketEdits.put(playerId, new PendingMarketEdit(pending.marketType, pending.stockId,
+                            pending.page, MarketEditStep.SHARE_AMOUNT, target.getUniqueId(), targetName));
                     player.sendMessage(ChatColor.YELLOW + "Enter the number of shares " + targetName
                             + " should own (0 or greater), or type cancel confirm.");
                 }
@@ -498,13 +507,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                         if (amount < 0 || pending.targetPlayerId == null) {
                             throw new NumberFormatException();
                         }
-                        String playerPath = "players." + pending.targetPlayerId;
-                        marketData.set(playerPath + ".holdings." + pending.stockId, amount);
-                        String lotsPath = playerPath + ".share_lots." + pending.stockId;
+                        marketData.set(marketHoldingPath(pending.marketType,
+                                pending.targetPlayerId, pending.stockId), amount);
+                        String lotsPath = marketShareLotsPath(pending.marketType,
+                                pending.targetPlayerId, pending.stockId);
                         if (amount == 0) {
                             marketData.set(lotsPath, null);
                         } else {
-                            double price = marketData.getDouble("stocks." + pending.stockId + ".price", 1.0);
+                            double price = marketData.getDouble(stockPath + ".price", 1.0);
                             marketData.set(lotsPath, List.of(amount + "|" + Double.toString(price)
                                     + "|" + Double.toString(price * amount)));
                         }
@@ -512,8 +522,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                         saveMarketData();
                         player.sendMessage(ChatColor.GREEN + pending.targetPlayerName + " now owns "
                                 + amount + " share(s) of "
-                                + marketData.getString("stocks." + pending.stockId + ".name", pending.stockId) + ".");
-                        openGoldStockEditOptions(player, pending.stockId, pending.page);
+                                + marketData.getString(stockPath + ".name", pending.stockId) + ".");
+                        openMarketStockEditOptions(player, pending.marketType, pending.stockId, pending.page);
                     } catch (NumberFormatException exception) {
                         player.sendMessage(ChatColor.RED + "Enter a whole number of 0 or greater, or type cancel confirm.");
                     }
@@ -1206,53 +1216,57 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
                 return;
             }
-            if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 13) {
-                openGoldStocks(player, 0, holder.editMode);
+            if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 11) {
+                openMarketStocks(player, MarketType.GOLD, 0, holder.editMode);
+            } else if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 15) {
+                openMarketStocks(player, MarketType.ENCHANTED_GOLDEN_APPLE, 0, holder.editMode);
             } else if (holder.view == MarketView.STOCK_SELECT) {
                 if (event.getRawSlot() == 22) {
                     openMarketSelector(player, holder.editMode);
                 } else if (event.getRawSlot() == 18 && holder.page > 0) {
-                    openGoldStocks(player, holder.page - 1, holder.editMode);
+                    openMarketStocks(player, holder.marketType, holder.page - 1, holder.editMode);
                 } else if (event.getRawSlot() == 26
-                        && (holder.page + 1) * 7 < getGoldStockIds().size()) {
-                    openGoldStocks(player, holder.page + 1, holder.editMode);
+                        && (holder.page + 1) * 7 < getMarketStockIds(holder.marketType).size()) {
+                    openMarketStocks(player, holder.marketType, holder.page + 1, holder.editMode);
                 } else {
                     String stockId = holder.stockSlots.get(event.getRawSlot());
                     if (stockId != null) {
                         if (holder.editMode) {
-                            openGoldStockEditOptions(player, stockId, holder.page);
+                            openMarketStockEditOptions(player, holder.marketType, stockId, holder.page);
                         } else {
-                            openGoldStockDetail(player, stockId, holder.page);
+                            openMarketStockDetail(player, holder.marketType, stockId, holder.page);
                         }
                     }
                 }
             } else if (holder.view == MarketView.STOCK_EDIT_OPTIONS && holder.stockId != null) {
                 if (event.getRawSlot() == 22) {
-                    openGoldStocks(player, holder.page, true);
+                    openMarketStocks(player, holder.marketType, holder.page, true);
                 } else if (event.getRawSlot() == 11) {
-                    promptMarketEdit(player, holder.stockId, holder.page, MarketEditStep.SHARE_PRICE,
-                            "Enter the new share price in gold.");
+                    promptMarketEdit(player, holder.marketType, holder.stockId, holder.page,
+                            MarketEditStep.SHARE_PRICE,
+                            "Enter the new share price in " + holder.marketType.currencyName + ".");
                 } else if (event.getRawSlot() == 13) {
-                    promptMarketEdit(player, holder.stockId, holder.page, MarketEditStep.BUY_TAX,
+                    promptMarketEdit(player, holder.marketType, holder.stockId, holder.page, MarketEditStep.BUY_TAX,
                             "Enter the new buy tax percentage. Values above 100% are allowed.");
                 } else if (event.getRawSlot() == 15) {
-                    promptMarketEdit(player, holder.stockId, holder.page, MarketEditStep.PLAYER_NAME,
+                    promptMarketEdit(player, holder.marketType, holder.stockId, holder.page,
+                            MarketEditStep.PLAYER_NAME,
                             "Enter the username of a player who has joined this server before.");
                 }
             } else if (holder.view == MarketView.STOCK_DETAIL && holder.stockId != null) {
                 if (event.getRawSlot() == 22) {
-                    openGoldStocks(player, holder.page);
+                    openMarketStocks(player, holder.marketType, holder.page, false);
                 } else {
                     switch (event.getRawSlot()) {
-                        case 10 -> buyGoldShares(player, holder.stockId, 1, holder.page);
-                        case 11 -> buyGoldShares(player, holder.stockId, 5, holder.page);
-                        case 12 -> buyGoldShares(player, holder.stockId, 10, holder.page);
-                        case 13 -> buyGoldShares(player, holder.stockId, 64, holder.page);
-                        case 14 -> promptGoldShareAmount(player, holder.stockId, holder.page);
-                        case 15 -> sellGoldShares(player, holder.stockId, 1, holder.page);
-                        case 16 -> sellGoldShares(player, holder.stockId, 5, holder.page);
-                        case 17 -> sellGoldShares(player, holder.stockId, 10, holder.page);
-                        case 18 -> sellGoldShares(player, holder.stockId, -1, holder.page);
+                        case 10 -> buyMarketShares(player, holder.marketType, holder.stockId, 1, holder.page);
+                        case 11 -> buyMarketShares(player, holder.marketType, holder.stockId, 5, holder.page);
+                        case 12 -> buyMarketShares(player, holder.marketType, holder.stockId, 10, holder.page);
+                        case 13 -> buyMarketShares(player, holder.marketType, holder.stockId, 64, holder.page);
+                        case 14 -> promptMarketShareAmount(player, holder.marketType, holder.stockId, holder.page);
+                        case 15 -> sellMarketShares(player, holder.marketType, holder.stockId, 1, holder.page);
+                        case 16 -> sellMarketShares(player, holder.marketType, holder.stockId, 5, holder.page);
+                        case 17 -> sellMarketShares(player, holder.marketType, holder.stockId, 10, holder.page);
+                        case 18 -> sellMarketShares(player, holder.marketType, holder.stockId, -1, holder.page);
                         default -> {
                         }
                     }
@@ -1478,6 +1492,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         UUID playerId = event.getPlayer().getUniqueId();
         pendingMarketEdits.remove(playerId);
         marketEditStockSelections.remove(playerId);
+        marketEditMarketSelections.remove(playerId);
         marketEditSessions.remove(playerId);
         PermissionAttachment attachment = locatePermissionAttachments.remove(playerId);
         if (attachment != null) {
@@ -1627,6 +1642,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         saveMarketData();
     }
 
+    private void initializeEnchantedAppleMarketStocks() {
+        String stocksPath = MarketType.ENCHANTED_GOLDEN_APPLE.stockRoot;
+        ConfigurationSection stocks = marketData.getConfigurationSection(stocksPath);
+        if (stocks != null && !stocks.getKeys(false).isEmpty()) {
+            for (String stockId : stocks.getKeys(false)) {
+                String taxPath = marketStockPath(MarketType.ENCHANTED_GOLDEN_APPLE, stockId) + ".tax_percent";
+                if (!marketData.contains(taxPath)) {
+                    marketData.set(taxPath, generateEnchantedAppleStockTaxPercent());
+                }
+            }
+            saveMarketData();
+            return;
+        }
+        for (int index = 0; index < 9; index++) {
+            createRandomEnchantedAppleStock();
+        }
+        saveMarketData();
+    }
+
     private void createRandomGoldStock() {
         String[] prefixes = {"Auric", "Gilded", "Golden", "Crown", "Bullion", "Sunlit", "Midas", "Ore"};
         String[] suffixes = {"Holdings", "Exchange", "Mining", "Capital", "Reserve", "Industries", "Trading", "Works"};
@@ -1681,49 +1715,118 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return random.nextInt(1, 51) / 10.0;
     }
 
+    private void createRandomEnchantedAppleStock() {
+        String[] prefixes = {"Enchanted", "Golden", "Glistening", "Mystic", "Crimson", "Orchard"};
+        String[] suffixes = {"Orchard", "Harvest", "Exchange", "Farms", "Foods", "Holdings"};
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int index = marketData.getInt("next_apple_stock_id", 1);
+        String stockId;
+        do {
+            stockId = String.format(Locale.ROOT, "apple_%02d", index++);
+        } while (marketData.isConfigurationSection(marketStockPath(
+                MarketType.ENCHANTED_GOLDEN_APPLE, stockId)));
+        marketData.set("next_apple_stock_id", index);
+
+        Set<String> names = new HashSet<>();
+        for (String existingId : getMarketStockIds(MarketType.ENCHANTED_GOLDEN_APPLE)) {
+            names.add(marketData.getString(marketStockPath(
+                    MarketType.ENCHANTED_GOLDEN_APPLE, existingId) + ".name", existingId));
+        }
+        String baseName = prefixes[random.nextInt(prefixes.length)] + " "
+                + suffixes[random.nextInt(suffixes.length)];
+        String name = baseName;
+        for (int suffix = 2; names.contains(name); suffix++) {
+            name = baseName + " " + suffix;
+        }
+
+        String path = marketStockPath(MarketType.ENCHANTED_GOLDEN_APPLE, stockId);
+        marketData.set(path + ".name", name);
+        marketData.set(path + ".price", random.nextInt(100, 1501) / 100.0);
+        marketData.set(path + ".apple_reserve", 0);
+        int changeIntervalSeconds = random.nextInt(5, 121);
+        marketData.set(path + ".change_interval_seconds", changeIntervalSeconds);
+        marketData.set(path + ".next_change_at", System.currentTimeMillis() + changeIntervalSeconds * 1000L);
+        marketData.set(path + ".natural_change_scale", random.nextDouble(0.5, 1.51));
+        marketData.set(path + ".tax_percent", generateEnchantedAppleStockTaxPercent());
+    }
+
+    private double generateEnchantedAppleStockTaxPercent() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int roll = random.nextInt(1000);
+        if (roll == 0) {
+            return random.nextInt(1, 50) / 10.0;
+        }
+        if (roll < 100) {
+            return random.nextInt(51, 100) / 10.0;
+        }
+        if (roll < 900) {
+            return random.nextInt(101, 200) / 10.0;
+        }
+        if (roll < 960) {
+            return random.nextInt(201, 500) / 10.0;
+        }
+        if (roll < 980) {
+            return random.nextInt(501, 750) / 10.0;
+        }
+        if (roll < 990) {
+            return random.nextInt(751, 850) / 10.0;
+        }
+        if (roll < 999) {
+            return random.nextInt(851, 1000) / 10.0;
+        }
+        return 100.0;
+    }
+
     private void simulateMarketTrades() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         long now = System.currentTimeMillis();
-        for (String stockId : getGoldStockIds()) {
-            String path = "stocks." + stockId;
-            int changeIntervalSeconds = marketData.getInt(path + ".change_interval_seconds", 0);
-            if (changeIntervalSeconds < 5) {
-                changeIntervalSeconds = random.nextInt(5, 121);
-                marketData.set(path + ".change_interval_seconds", changeIntervalSeconds);
-            }
-            long nextChangeAt = marketData.getLong(path + ".next_change_at", 0L);
-            if (nextChangeAt <= 0L) {
+        for (MarketType marketType : MarketType.values()) {
+            for (String stockId : getMarketStockIds(marketType)) {
+                String path = marketStockPath(marketType, stockId);
+                int changeIntervalSeconds = marketData.getInt(path + ".change_interval_seconds", 0);
+                if (changeIntervalSeconds < 5) {
+                    changeIntervalSeconds = random.nextInt(5, 121);
+                    marketData.set(path + ".change_interval_seconds", changeIntervalSeconds);
+                }
+                long nextChangeAt = marketData.getLong(path + ".next_change_at", 0L);
+                if (nextChangeAt <= 0L) {
+                    marketData.set(path + ".next_change_at", now + changeIntervalSeconds * 1000L);
+                    continue;
+                }
+                if (now < nextChangeAt) {
+                    continue;
+                }
                 marketData.set(path + ".next_change_at", now + changeIntervalSeconds * 1000L);
-                continue;
+                double currentPrice = marketData.getDouble(path + ".price", 1.0);
+                double naturalChangeScale = marketData.getDouble(path + ".natural_change_scale", 0.0);
+                if (naturalChangeScale <= 0.0) {
+                    naturalChangeScale = random.nextDouble(0.5, 1.51);
+                    marketData.set(path + ".natural_change_scale", naturalChangeScale);
+                }
+                double valueScale = Math.max(0.25, Math.min(2.0, currentPrice / 10.0));
+                double changeScale = valueScale * naturalChangeScale;
+                boolean fakePlayerBuys = random.nextBoolean();
+                int fakeShares = random.nextInt(1, 51);
+                double tradeImpact = Math.min(0.05, fakeShares * 0.001 * changeScale);
+                double randomMarketMovement = random.nextDouble(-0.02, 0.02) * changeScale;
+                double direction = fakePlayerBuys ? tradeImpact : -tradeImpact;
+                updateMarketStockPrice(marketType,
+                        stockId, currentPrice * (1.0 + direction + randomMarketMovement),
+                        "fake:" + UUID.randomUUID());
             }
-            if (now < nextChangeAt) {
-                continue;
+            if (random.nextInt(600) == 0) {
+                if (marketType == MarketType.GOLD) {
+                    createRandomGoldStock();
+                } else {
+                    createRandomEnchantedAppleStock();
+                }
             }
-            marketData.set(path + ".next_change_at", now + changeIntervalSeconds * 1000L);
-            double currentPrice = marketData.getDouble(path + ".price", 1.0);
-            double naturalChangeScale = marketData.getDouble(path + ".natural_change_scale", 0.0);
-            if (naturalChangeScale <= 0.0) {
-                naturalChangeScale = random.nextDouble(0.5, 1.51);
-                marketData.set(path + ".natural_change_scale", naturalChangeScale);
-            }
-            double valueScale = Math.max(0.25, Math.min(2.0, currentPrice / 10.0));
-            double changeScale = valueScale * naturalChangeScale;
-            boolean fakePlayerBuys = random.nextBoolean();
-            int fakeShares = random.nextInt(1, 51);
-            double tradeImpact = Math.min(0.05, fakeShares * 0.001 * changeScale);
-            double randomMarketMovement = random.nextDouble(-0.02, 0.02) * changeScale;
-            double direction = fakePlayerBuys ? tradeImpact : -tradeImpact;
-            updateGoldStockPrice(stockId, currentPrice * (1.0 + direction + randomMarketMovement),
-                    "fake:" + UUID.randomUUID());
-        }
-        if (random.nextInt(600) == 0) {
-            createRandomGoldStock();
         }
         saveMarketData();
     }
 
-    private void updateGoldStockPrice(String stockId, double price, String traderId) {
-        String path = "stocks." + stockId;
+    private void updateMarketStockPrice(MarketType marketType, String stockId, double price, String traderId) {
+        String path = marketStockPath(marketType, stockId);
         if (!marketData.isConfigurationSection(path)) {
             return;
         }
@@ -1750,7 +1853,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
             double crashStartPrice = marketData.getDouble(baselinePath, previousPrice);
             if (crashActors.size() >= 3 && updatedPrice < crashStartPrice * 0.25) {
-                declareGoldStockBankrupt(stockId, crashStartPrice, updatedPrice);
+                declareMarketStockBankrupt(marketType, stockId, crashStartPrice, updatedPrice);
             }
         } else if (updatedPrice > previousPrice) {
             marketData.set(path + ".crash_start_price", null);
@@ -1759,7 +1862,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private List<String> getGoldStockIds() {
-        ConfigurationSection stocks = marketData.getConfigurationSection("stocks");
+        return getMarketStockIds(MarketType.GOLD);
+    }
+
+    private List<String> getMarketStockIds(MarketType marketType) {
+        ConfigurationSection stocks = marketData.getConfigurationSection(marketType.stockRoot);
         if (stocks == null) {
             return List.of();
         }
@@ -1768,22 +1875,24 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return stockIds;
     }
 
-    private void declareGoldStockBankrupt(String stockId, double crashStartPrice, double finalPrice) {
-        String path = "stocks." + stockId;
+    private void declareMarketStockBankrupt(
+            MarketType marketType, String stockId, double crashStartPrice, double finalPrice) {
+        String path = marketStockPath(marketType, stockId);
         String stockName = marketData.getString(path + ".name", stockId);
         ConfigurationSection players = marketData.getConfigurationSection("players");
         if (players != null) {
             for (String playerId : new ArrayList<>(players.getKeys(false))) {
-                String holdingPath = "players." + playerId + ".holdings." + stockId;
+                String holdingPath = "players." + playerId + "." + marketType.holdingsKey + "." + stockId;
                 int shares = marketData.getInt(holdingPath, 0);
                 if (shares <= 0) {
                     continue;
                 }
                 marketData.set(holdingPath, null);
-                marketData.set("players." + playerId + ".share_lots." + stockId, null);
-                String notification = ChatColor.RED + "The Gold Market stock " + stockName
+                marketData.set("players." + playerId + "." + marketType.shareLotsKey + "." + stockId, null);
+                String notification = ChatColor.RED + "The " + marketType.displayName + " stock " + stockName
                         + " went bankrupt. Your " + shares
-                        + " share(s) were lost, along with all gold remaining in the stock.";
+                        + " share(s) were lost, along with all " + marketType.currencyName
+                        + " remaining in the stock.";
                 try {
                     Player onlinePlayer = Bukkit.getPlayer(UUID.fromString(playerId));
                     if (onlinePlayer != null) {
@@ -1798,8 +1907,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 }
             }
         }
-        getLogger().info("Gold Market stock " + stockName + " declared bankrupt after falling from "
-                + formatGoldPrice(crashStartPrice) + " to " + formatGoldPrice(finalPrice) + " gold.");
+        getLogger().info(marketType.displayName + " stock " + stockName
+                + " declared bankrupt after falling from " + formatGoldPrice(crashStartPrice)
+                + " to " + formatGoldPrice(finalPrice) + " " + marketType.currencyName + ".");
         marketData.set(path, null);
         saveMarketData();
     }
@@ -1810,10 +1920,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private void openMarketSelector(Player player, boolean editMode) {
         marketEditStockSelections.remove(player.getUniqueId());
-        MarketMenuHolder holder = new MarketMenuHolder(MarketView.MARKET_SELECT, null, 0, editMode);
+        marketEditMarketSelections.remove(player.getUniqueId());
+        MarketMenuHolder holder = new MarketMenuHolder(
+                MarketView.MARKET_SELECT, null, 0, MarketType.GOLD, editMode);
         holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_GREEN + "Markets");
-        holder.inventory.setItem(13, createMarketItem("GOLD_INGOT", ChatColor.GOLD + "Gold Market",
+        holder.inventory.setItem(11, createMarketItem("GOLD_INGOT", ChatColor.GOLD + "Gold Market",
                 ChatColor.GRAY + "Trade shares priced in gold ingots.",
+                ChatColor.YELLOW + "Click to browse stocks"));
+        holder.inventory.setItem(15, createMarketItem("ENCHANTED_GOLDEN_APPLE",
+                ChatColor.GOLD + "Enchanted Golden Apple Market",
+                ChatColor.GRAY + "Trade shares priced in enchanted golden apples.",
                 ChatColor.YELLOW + "Click to browse stocks"));
         player.openInventory(holder.inventory);
     }
@@ -1827,11 +1943,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void openGoldStocks(Player player, int requestedPage, boolean editMode) {
+        openMarketStocks(player, MarketType.GOLD, requestedPage, editMode);
+    }
+
+    private void openMarketStocks(Player player, MarketType marketType, int requestedPage, boolean editMode) {
         marketEditStockSelections.remove(player.getUniqueId());
-        List<String> stockIds = getGoldStockIds();
+        marketEditMarketSelections.remove(player.getUniqueId());
+        List<String> stockIds = getMarketStockIds(marketType);
         stockIds.sort((left, right) -> {
-            boolean leftOwned = getGoldShares(player, left) > 0;
-            boolean rightOwned = getGoldShares(player, right) > 0;
+            boolean leftOwned = getMarketShares(player, marketType, left) > 0;
+            boolean rightOwned = getMarketShares(player, marketType, right) > 0;
             if (leftOwned != rightOwned) {
                 return leftOwned ? -1 : 1;
             }
@@ -1839,25 +1960,27 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         });
         int maxPage = Math.max(0, (stockIds.size() - 1) / 7);
         int page = Math.max(0, Math.min(requestedPage, maxPage));
-        MarketMenuHolder holder = new MarketMenuHolder(MarketView.STOCK_SELECT, null, page, editMode);
+        MarketMenuHolder holder = new MarketMenuHolder(
+                MarketView.STOCK_SELECT, null, page, marketType, editMode);
         holder.inventory = Bukkit.createInventory(holder, 27,
-                ChatColor.DARK_GREEN + "Gold Market " + (page + 1) + "/" + (maxPage + 1));
+                ChatColor.DARK_GREEN + marketType.displayName + " " + (page + 1) + "/" + (maxPage + 1));
         int[] slots = {10, 11, 12, 13, 14, 15, 16};
         int start = page * slots.length;
         for (int index = start; index < stockIds.size() && index < start + slots.length; index++) {
             String stockId = stockIds.get(index);
-            String path = "stocks." + stockId;
+            String path = marketStockPath(marketType, stockId);
             int slot = slots[index - start];
             holder.stockSlots.put(slot, stockId);
             List<String> stockLore = new ArrayList<>();
             stockLore.add(ChatColor.GRAY + "Share price: "
-                    + formatGoldPrice(marketData.getDouble(path + ".price", 1.0)) + " gold ingots");
+                    + formatGoldPrice(marketData.getDouble(path + ".price", 1.0)) + " "
+                    + marketType.currencyUnit);
             stockLore.add(ChatColor.GRAY + "Buy tax: "
                     + formatGoldPrice(marketData.getDouble(path + ".tax_percent", 0.1)) + "%");
-            stockLore.add(ChatColor.GRAY + "Shares owned: " + getGoldShares(player, stockId));
-            stockLore.addAll(getGoldStockPerformanceLore(stockId));
+            stockLore.add(ChatColor.GRAY + "Shares owned: " + getMarketShares(player, marketType, stockId));
+            stockLore.addAll(getMarketStockPerformanceLore(marketType, stockId));
             stockLore.add(ChatColor.YELLOW + "Click to view this stock");
-            holder.inventory.setItem(slot, createMarketItem("GOLD_INGOT",
+            holder.inventory.setItem(slot, createMarketItem(marketType.currencyItem,
                     ChatColor.GOLD + marketData.getString(path + ".name", stockId),
                     stockLore.toArray(new String[0])));
         }
@@ -1872,14 +1995,20 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void openGoldStockEditOptions(Player player, String stockId, int page) {
-        String path = "stocks." + stockId;
+        openMarketStockEditOptions(player, MarketType.GOLD, stockId, page);
+    }
+
+    private void openMarketStockEditOptions(Player player, MarketType marketType, String stockId, int page) {
+        String path = marketStockPath(marketType, stockId);
         if (!marketData.isConfigurationSection(path)) {
-            openGoldStocks(player, page, true);
+            openMarketStocks(player, marketType, page, true);
             return;
         }
         marketEditStockSelections.put(player.getUniqueId(), stockId);
+        marketEditMarketSelections.put(player.getUniqueId(), marketType);
         String stockName = marketData.getString(path + ".name", stockId);
-        MarketMenuHolder holder = new MarketMenuHolder(MarketView.STOCK_EDIT_OPTIONS, stockId, page, true);
+        MarketMenuHolder holder = new MarketMenuHolder(
+                MarketView.STOCK_EDIT_OPTIONS, stockId, page, marketType, true);
         holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_GREEN + "Edit " + stockName);
         holder.inventory.setItem(11, createMarketItem("EMERALD", ChatColor.GREEN + "Share Price",
                 ChatColor.GRAY + "Set this stock's share price in chat."));
@@ -1887,19 +2016,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 ChatColor.GRAY + "Set any non-negative tax percentage."));
         holder.inventory.setItem(15, createMarketItem("PAPER", ChatColor.YELLOW + "Shares Owned",
                 ChatColor.GRAY + "Set a player's total shares in this stock."));
-        holder.inventory.setItem(22, createMarketItem("ARROW", ChatColor.YELLOW + "Back to gold stocks"));
+        holder.inventory.setItem(22, createMarketItem("ARROW",
+                ChatColor.YELLOW + "Back to " + marketType.displayName + " stocks"));
         player.openInventory(holder.inventory);
     }
 
-    private void promptMarketEdit(Player player, String stockId, int page, MarketEditStep step, String prompt) {
+    private void promptMarketEdit(Player player, MarketType marketType, String stockId,
+            int page, MarketEditStep step, String prompt) {
         pendingMarketEdits.put(player.getUniqueId(),
-                new PendingMarketEdit(stockId, page, step, null, null));
+                new PendingMarketEdit(marketType, stockId, page, step, null, null));
         player.closeInventory();
         player.sendMessage(ChatColor.YELLOW + prompt + " Type cancel confirm at any time to stop editing.");
     }
 
     private List<String> getGoldStockPerformanceLore(String stockId) {
-        String path = "stocks." + stockId;
+        return getMarketStockPerformanceLore(MarketType.GOLD, stockId);
+    }
+
+    private List<String> getMarketStockPerformanceLore(MarketType marketType, String stockId) {
+        String path = marketStockPath(marketType, stockId);
         List<Double> recentTradePrices = marketData.getDoubleList(path + ".recent_trade_prices");
         List<String> lore = new ArrayList<>();
         if (recentTradePrices.size() >= 2) {
@@ -1918,7 +2053,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             lore.add(ChatColor.GOLD + "15-trade average: unavailable");
         } else {
             double averagePrice = recentTradePrices.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-            lore.add(ChatColor.GOLD + "15-trade average: " + formatGoldPrice(averagePrice) + " gold");
+            lore.add(ChatColor.GOLD + "15-trade average: " + formatGoldPrice(averagePrice)
+                    + " " + marketType.currencyName);
         }
         return lore;
     }
@@ -1928,28 +2064,35 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void openGoldStockDetail(Player player, String stockId, int page) {
-        String path = "stocks." + stockId;
+        openMarketStockDetail(player, MarketType.GOLD, stockId, page);
+    }
+
+    private void openMarketStockDetail(Player player, MarketType marketType, String stockId, int page) {
+        String path = marketStockPath(marketType, stockId);
         if (!marketData.isConfigurationSection(path)) {
-            openGoldStocks(player, page);
+            openMarketStocks(player, marketType, page, false);
             return;
         }
 
         double price = marketData.getDouble(path + ".price", 1.0);
-        int ownedShares = getGoldShares(player, stockId);
+        int ownedShares = getMarketShares(player, marketType, stockId);
         String stockName = marketData.getString(path + ".name", stockId);
-        MarketMenuHolder holder = new MarketMenuHolder(MarketView.STOCK_DETAIL, stockId, page);
+        MarketMenuHolder holder = new MarketMenuHolder(
+                MarketView.STOCK_DETAIL, stockId, page, marketType, false);
         holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_GREEN + stockName);
         List<String> stockLore = new ArrayList<>();
-        stockLore.add(ChatColor.GRAY + "Current price: " + formatGoldPrice(price) + " gold ingots per share");
+        stockLore.add(ChatColor.GRAY + "Current price: " + formatGoldPrice(price) + " "
+                + marketType.currencyUnit + " per share");
         double taxPercent = marketData.getDouble(path + ".tax_percent", 0.1);
         stockLore.add(ChatColor.GRAY + "Buy tax: " + formatGoldPrice(taxPercent) + "%");
         stockLore.add(ChatColor.GRAY + "You own: " + ownedShares + " share(s)");
-        for (GoldShareLot lot : getGoldShareLots(player, stockId)) {
+        for (GoldShareLot lot : getMarketShareLots(player, marketType, stockId)) {
             stockLore.add(ChatColor.YELLOW + String.valueOf(lot.shares) + " share(s) bought at "
-                    + formatGoldPrice(lot.price) + " gold per share");
-            stockLore.add(ChatColor.GRAY + "Invested: " + formatGoldPrice(lot.cost) + " gold ingot(s)");
+                    + formatGoldPrice(lot.price) + " " + marketType.currencyName + " per share");
+            stockLore.add(ChatColor.GRAY + "Invested: " + formatGoldPrice(lot.cost) + " "
+                    + marketType.currencyUnit);
         }
-        holder.inventory.setItem(4, createMarketItem("GOLD_INGOT", ChatColor.GOLD + stockName,
+        holder.inventory.setItem(4, createMarketItem(marketType.currencyItem, ChatColor.GOLD + stockName,
                 stockLore.toArray(new String[0])));
 
         int[] buySlots = {10, 11, 12, 13};
@@ -1962,7 +2105,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     ChatColor.GREEN + "Buy " + amount + " share(s)",
                     ChatColor.GRAY + "Subtotal: " + formatGoldPrice(subtotal) + " gold",
                     ChatColor.GRAY + "Tax rate: " + formatGoldPrice(taxPercent) + "%",
-                    ChatColor.GREEN + "Total: " + cost + " gold ingot(s)"));
+                    ChatColor.GREEN + "Total: " + cost + " " + marketType.currencyUnit));
         }
         holder.inventory.setItem(14, createMarketItem("PAPER", ChatColor.GREEN + "Buy a custom amount",
                 ChatColor.GRAY + "Type a quantity from 1 to 64 in chat."));
@@ -1971,13 +2114,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         int[] sellAmounts = {1, 5, 10};
         for (int index = 0; index < sellSlots.length; index++) {
             int amount = sellAmounts[index];
-            holder.inventory.setItem(sellSlots[index], createMarketItem("GOLD_NUGGET",
+            holder.inventory.setItem(sellSlots[index], createMarketItem(marketType.currencyItem,
                     ChatColor.YELLOW + "Sell " + amount + " share(s)",
-                    getGoldSellLore(player, stockId, amount, price)));
+                    getMarketSellLore(player, marketType, stockId, amount, price)));
         }
-        holder.inventory.setItem(18, createMarketItem("GOLD_BLOCK", ChatColor.YELLOW + "Sell all shares",
-                getGoldSellLore(player, stockId, -1, price)));
-        holder.inventory.setItem(22, createMarketItem("ARROW", ChatColor.YELLOW + "Back to gold stocks"));
+        holder.inventory.setItem(18, createMarketItem(marketType.currencyItem, ChatColor.YELLOW + "Sell all shares",
+                getMarketSellLore(player, marketType, stockId, -1, price)));
+        holder.inventory.setItem(22, createMarketItem("ARROW",
+                ChatColor.YELLOW + "Back to " + marketType.displayName + " stocks"));
         player.openInventory(holder.inventory);
     }
 
@@ -1996,8 +2140,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return String.format(Locale.US, "%.2f", price);
     }
 
+    private String marketStockPath(MarketType marketType, String stockId) {
+        return marketType.stockRoot + "." + stockId;
+    }
+
+    private String marketHoldingPath(MarketType marketType, UUID playerId, String stockId) {
+        return "players." + playerId + "." + marketType.holdingsKey + "." + stockId;
+    }
+
+    private String marketShareLotsPath(MarketType marketType, UUID playerId, String stockId) {
+        return "players." + playerId + "." + marketType.shareLotsKey + "." + stockId;
+    }
+
+    private int getMarketShares(Player player, MarketType marketType, String stockId) {
+        return Math.max(0, marketData.getInt(
+                marketHoldingPath(marketType, player.getUniqueId(), stockId), 0));
+    }
+
     private int getGoldShares(Player player, String stockId) {
-        return Math.max(0, marketData.getInt("players." + player.getUniqueId() + ".holdings." + stockId, 0));
+        return getMarketShares(player, MarketType.GOLD, stockId);
     }
 
     private static final class GoldShareLot {
@@ -2013,7 +2174,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private List<GoldShareLot> getGoldShareLots(Player player, String stockId) {
-        String lotsPath = "players." + player.getUniqueId() + ".share_lots." + stockId;
+        return getMarketShareLots(player, MarketType.GOLD, stockId);
+    }
+
+    private List<GoldShareLot> getMarketShareLots(Player player, MarketType marketType, String stockId) {
+        String lotsPath = marketShareLotsPath(marketType, player.getUniqueId(), stockId);
         List<GoldShareLot> lots = new ArrayList<>();
         for (String encodedLot : marketData.getStringList(lotsPath)) {
             String[] values = encodedLot.split("\\|", -1);
@@ -2031,22 +2196,27 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
         }
         if (lots.isEmpty()) {
-            int legacyShares = getGoldShares(player, stockId);
+            int legacyShares = getMarketShares(player, marketType, stockId);
             if (legacyShares > 0) {
-                double currentPrice = marketData.getDouble("stocks." + stockId + ".price", 1.0);
+                double currentPrice = marketData.getDouble(marketStockPath(marketType, stockId) + ".price", 1.0);
                 lots.add(new GoldShareLot(legacyShares, currentPrice, currentPrice * legacyShares));
-                saveGoldShareLots(player, stockId, lots);
+                saveMarketShareLots(player, marketType, stockId, lots);
             }
         }
         return lots;
     }
 
     private void saveGoldShareLots(Player player, String stockId, List<GoldShareLot> lots) {
+        saveMarketShareLots(player, MarketType.GOLD, stockId, lots);
+    }
+
+    private void saveMarketShareLots(
+            Player player, MarketType marketType, String stockId, List<GoldShareLot> lots) {
         List<String> encodedLots = new ArrayList<>();
         for (GoldShareLot lot : lots) {
             encodedLots.add(lot.shares + "|" + Double.toString(lot.price) + "|" + Double.toString(lot.cost));
         }
-        marketData.set("players." + player.getUniqueId() + ".share_lots." + stockId, encodedLots);
+        marketData.set(marketShareLotsPath(marketType, player.getUniqueId(), stockId), encodedLots);
         saveMarketData();
     }
 
@@ -2062,9 +2232,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private double getGoldShareCostBasis(Player player, String stockId, int sharesToSell) {
+        return getMarketShareCostBasis(player, MarketType.GOLD, stockId, sharesToSell);
+    }
+
+    private double getMarketShareCostBasis(
+            Player player, MarketType marketType, String stockId, int sharesToSell) {
         int remaining = sharesToSell;
         double costBasis = 0.0;
-        for (GoldShareLot lot : getGoldShareLots(player, stockId)) {
+        for (GoldShareLot lot : getMarketShareLots(player, marketType, stockId)) {
             int sold = Math.min(remaining, lot.shares);
             if (sold > 0) {
                 costBasis += sold == lot.shares ? lot.cost : lot.cost * sold / lot.shares;
@@ -2078,9 +2253,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void removeGoldShareLots(Player player, String stockId, int sharesToSell) {
+        removeMarketShareLots(player, MarketType.GOLD, stockId, sharesToSell);
+    }
+
+    private void removeMarketShareLots(Player player, MarketType marketType, String stockId, int sharesToSell) {
         int remaining = sharesToSell;
         List<GoldShareLot> remainingLots = new ArrayList<>();
-        List<GoldShareLot> lots = getGoldShareLots(player, stockId);
+        List<GoldShareLot> lots = getMarketShareLots(player, marketType, stockId);
         for (int index = 0; index < lots.size(); index++) {
             GoldShareLot lot = lots.get(index);
             int sold = Math.min(remaining, lot.shares);
@@ -2096,7 +2275,26 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 break;
             }
         }
-        saveGoldShareLots(player, stockId, remainingLots);
+        saveMarketShareLots(player, marketType, stockId, remainingLots);
+    }
+
+    private String[] getMarketSellLore(
+            Player player, MarketType marketType, String stockId, int requestedAmount, double price) {
+        int ownedShares = getMarketShares(player, marketType, stockId);
+        int sharesToSell = requestedAmount < 0 ? ownedShares : Math.min(requestedAmount, ownedShares);
+        if (sharesToSell <= 0) {
+            return new String[]{ChatColor.GRAY + "Shares owned: " + ownedShares,
+                    ChatColor.GRAY + "No shares available to sell."};
+        }
+        int payout = (int) Math.max(1, Math.floor(price * sharesToSell));
+        double profit = payout - getMarketShareCostBasis(player, marketType, stockId, sharesToSell);
+        String result = profit > 0.005
+                ? ChatColor.GREEN + "Expected gain: " + formatGoldPrice(profit) + " " + marketType.currencyName
+                : profit < -0.005
+                        ? ChatColor.RED + "Expected loss: " + formatGoldPrice(-profit) + " " + marketType.currencyName
+                        : ChatColor.YELLOW + "Expected break-even";
+        return new String[]{ChatColor.GRAY + "Shares to sell: " + sharesToSell,
+                ChatColor.GRAY + "Estimated return: " + payout + " " + marketType.currencyUnit, result};
     }
 
     private String[] getGoldSellLore(Player player, String stockId, int requestedAmount, double price) {
@@ -2159,6 +2357,66 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return (int) Math.max(1, Math.ceil(price * amount * (1.0 + taxPercent / 100.0)));
     }
 
+    private void buyMarketShares(Player player, MarketType marketType, String stockId, int amount, int page) {
+        if (marketType == MarketType.GOLD) {
+            buyGoldShares(player, stockId, amount, page);
+        } else {
+            buyEnchantedAppleShares(player, stockId, amount, page);
+        }
+    }
+
+    private void sellMarketShares(Player player, MarketType marketType, String stockId, int amount, int page) {
+        if (marketType == MarketType.GOLD) {
+            sellGoldShares(player, stockId, amount, page);
+        } else {
+            sellEnchantedAppleShares(player, stockId, amount, page);
+        }
+    }
+
+    private void promptMarketShareAmount(Player player, MarketType marketType, String stockId, int page) {
+        pendingMarketPurchases.put(player.getUniqueId(), new PendingMarketPurchase(marketType, stockId, page));
+        player.closeInventory();
+        player.sendMessage(ChatColor.YELLOW + "Type how many shares to buy (1-64), or type cancel.");
+    }
+
+    private int countEnchantedGoldenApples(Player player) {
+        int count = 0;
+        for (ItemStack item : player.getInventory().getStorageContents()) {
+            if (item != null && "ENCHANTED_GOLDEN_APPLE".equals(item.getType().name())) {
+                count += item.getAmount();
+            }
+        }
+        return count;
+    }
+
+    private boolean removeEnchantedGoldenApples(Player player, int amount) {
+        int remaining = amount;
+        int storageSize = player.getInventory().getStorageContents().length;
+        for (int slot = 0; slot < storageSize && remaining > 0; slot++) {
+            ItemStack item = player.getInventory().getItem(slot);
+            if (item == null || !"ENCHANTED_GOLDEN_APPLE".equals(item.getType().name())) {
+                continue;
+            }
+            int removed = Math.min(remaining, item.getAmount());
+            remaining -= removed;
+            if (removed == item.getAmount()) {
+                player.getInventory().setItem(slot, null);
+            } else {
+                item.setAmount(item.getAmount() - removed);
+            }
+        }
+        return remaining == 0;
+    }
+
+    private void giveEnchantedGoldenApples(Player player, int amount) {
+        ItemStack apples = XMaterial.matchXMaterial("ENCHANTED_GOLDEN_APPLE")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Enchanted golden apple is unavailable"));
+        apples.setAmount(amount);
+        Map<Integer, ItemStack> overflow = player.getInventory().addItem(apples);
+        overflow.values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
+    }
+
     private void buyGoldShares(Player player, String stockId, int amount) {
         buyGoldShares(player, stockId, amount, 0);
     }
@@ -2203,7 +2461,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void promptGoldShareAmount(Player player, String stockId, int page) {
-        pendingMarketPurchases.put(player.getUniqueId(), new PendingMarketPurchase(stockId, page));
+        pendingMarketPurchases.put(player.getUniqueId(),
+                new PendingMarketPurchase(MarketType.GOLD, stockId, page));
         player.closeInventory();
         player.sendMessage(ChatColor.YELLOW + "Type how many shares to buy (1-64), or type cancel.");
     }
@@ -2234,14 +2493,92 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         openGoldStockDetail(player, stockId, page);
     }
 
+    private void buyEnchantedAppleShares(Player player, String stockId, int amount, int page) {
+        MarketType marketType = MarketType.ENCHANTED_GOLDEN_APPLE;
+        String path = marketStockPath(marketType, stockId);
+        if (!marketData.isConfigurationSection(path)) {
+            player.sendMessage(ChatColor.RED + "That stock is no longer available.");
+            openMarketStocks(player, marketType, page, false);
+            return;
+        }
+        if (amount < 1 || amount > 64) {
+            player.sendMessage(ChatColor.RED + "You can buy between 1 and 64 shares at a time.");
+            openMarketStockDetail(player, marketType, stockId, page);
+            return;
+        }
+
+        double price = marketData.getDouble(path + ".price", 1.0);
+        double taxPercent = marketData.getDouble(path + ".tax_percent", 0.1);
+        double subtotal = price * amount;
+        int cost = getGoldPurchaseCost(price, amount, taxPercent);
+        if (countEnchantedGoldenApples(player) < cost) {
+            player.sendMessage(ChatColor.RED + "You need " + cost + " enchanted golden apple(s) to buy those shares.");
+            return;
+        }
+        if (!removeEnchantedGoldenApples(player, cost)) {
+            return;
+        }
+
+        UUID playerId = player.getUniqueId();
+        List<GoldShareLot> lots = getMarketShareLots(player, marketType, stockId);
+        addGoldShareLot(lots, amount, price, subtotal);
+        int newHolding = getMarketShares(player, marketType, stockId) + amount;
+        marketData.set(marketHoldingPath(marketType, playerId, stockId), newHolding);
+        saveMarketShareLots(player, marketType, stockId, lots);
+        marketData.set(path + ".apple_reserve", marketData.getDouble(path + ".apple_reserve", 0.0) + subtotal);
+        adjustMarketStockPrice(marketType, stockId, amount, true);
+        saveMarketData();
+        player.sendMessage(ChatColor.GREEN + "Bought " + amount + " share(s) for " + cost
+                + " enchanted golden apple(s), including " + formatGoldPrice(taxPercent) + "% tax.");
+        openMarketStockDetail(player, marketType, stockId, page);
+    }
+
+    private void sellEnchantedAppleShares(Player player, String stockId, int requestedAmount, int page) {
+        MarketType marketType = MarketType.ENCHANTED_GOLDEN_APPLE;
+        String path = marketStockPath(marketType, stockId);
+        if (!marketData.isConfigurationSection(path)) {
+            player.sendMessage(ChatColor.RED + "That stock is no longer available.");
+            openMarketStocks(player, marketType, page, false);
+            return;
+        }
+        int ownedShares = getMarketShares(player, marketType, stockId);
+        int amount = requestedAmount < 0 ? ownedShares : Math.min(requestedAmount, ownedShares);
+        if (amount < 1) {
+            player.sendMessage(ChatColor.RED + "You do not have any shares to sell.");
+            return;
+        }
+
+        double price = marketData.getDouble(path + ".price", 1.0);
+        int payout = (int) Math.max(1, Math.floor(price * amount));
+        removeMarketShareLots(player, marketType, stockId, amount);
+        marketData.set(marketHoldingPath(marketType, player.getUniqueId(), stockId), ownedShares - amount);
+        marketData.set(path + ".apple_reserve", marketData.getDouble(path + ".apple_reserve", 0.0) - payout);
+        adjustMarketStockPrice(marketType, stockId, amount, false, player.getUniqueId());
+        giveEnchantedGoldenApples(player, payout);
+        saveMarketData();
+        player.sendMessage(ChatColor.GREEN + "Sold " + amount + " share(s) for " + payout
+                + " enchanted golden apple(s).");
+        openMarketStockDetail(player, marketType, stockId, page);
+    }
+
     private void adjustGoldStockPrice(String stockId, int shares, boolean purchase) {
         adjustGoldStockPrice(stockId, shares, purchase, null);
     }
 
     private void adjustGoldStockPrice(String stockId, int shares, boolean purchase, UUID sellerId) {
-        double price = marketData.getDouble("stocks." + stockId + ".price", 1.0);
+        adjustMarketStockPrice(MarketType.GOLD, stockId, shares, purchase, sellerId);
+    }
+
+    private void adjustMarketStockPrice(
+            MarketType marketType, String stockId, int shares, boolean purchase) {
+        adjustMarketStockPrice(marketType, stockId, shares, purchase, null);
+    }
+
+    private void adjustMarketStockPrice(
+            MarketType marketType, String stockId, int shares, boolean purchase, UUID sellerId) {
+        double price = marketData.getDouble(marketStockPath(marketType, stockId) + ".price", 1.0);
         double movement = Math.min(0.10, shares * 0.0025);
-        updateGoldStockPrice(stockId, price * (purchase ? 1.0 + movement : 1.0 - movement),
+        updateMarketStockPrice(marketType, stockId, price * (purchase ? 1.0 + movement : 1.0 - movement),
                 sellerId == null ? null : sellerId.toString());
     }
 
@@ -3621,6 +3958,32 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         STOCK_DETAIL
     }
 
+    private enum MarketType {
+        GOLD("stocks", "holdings", "share_lots", "Gold Market", "GOLD_INGOT", "gold", "gold ingot(s)"),
+        ENCHANTED_GOLDEN_APPLE("enchanted_apple_stocks", "enchanted_apple_holdings",
+                "enchanted_apple_share_lots", "Enchanted Golden Apple Market", "ENCHANTED_GOLDEN_APPLE",
+                "enchanted golden apple", "enchanted golden apple(s)");
+
+        private final String stockRoot;
+        private final String holdingsKey;
+        private final String shareLotsKey;
+        private final String displayName;
+        private final String currencyItem;
+        private final String currencyName;
+        private final String currencyUnit;
+
+        MarketType(String stockRoot, String holdingsKey, String shareLotsKey, String displayName,
+                String currencyItem, String currencyName, String currencyUnit) {
+            this.stockRoot = stockRoot;
+            this.holdingsKey = holdingsKey;
+            this.shareLotsKey = shareLotsKey;
+            this.displayName = displayName;
+            this.currencyItem = currencyItem;
+            this.currencyName = currencyName;
+            this.currencyUnit = currencyUnit;
+        }
+    }
+
     private enum MarketEditStep {
         SHARE_PRICE,
         BUY_TAX,
@@ -3632,18 +3995,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         private final MarketView view;
         private final String stockId;
         private final int page;
+        private final MarketType marketType;
         private final boolean editMode;
         private final Map<Integer, String> stockSlots = new HashMap<>();
         private Inventory inventory;
 
         private MarketMenuHolder(MarketView view, String stockId, int page) {
-            this(view, stockId, page, false);
+            this(view, stockId, page, MarketType.GOLD, false);
         }
 
         private MarketMenuHolder(MarketView view, String stockId, int page, boolean editMode) {
+            this(view, stockId, page, MarketType.GOLD, editMode);
+        }
+
+        private MarketMenuHolder(
+                MarketView view, String stockId, int page, MarketType marketType, boolean editMode) {
             this.view = view;
             this.stockId = stockId;
             this.page = page;
+            this.marketType = marketType;
             this.editMode = editMode;
         }
 
@@ -3654,24 +4024,28 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private static final class PendingMarketPurchase {
+        private final MarketType marketType;
         private final String stockId;
         private final int page;
 
-        private PendingMarketPurchase(String stockId, int page) {
+        private PendingMarketPurchase(MarketType marketType, String stockId, int page) {
+            this.marketType = marketType;
             this.stockId = stockId;
             this.page = page;
         }
     }
 
     private static final class PendingMarketEdit {
+        private final MarketType marketType;
         private final String stockId;
         private final int page;
         private final MarketEditStep step;
         private final UUID targetPlayerId;
         private final String targetPlayerName;
 
-        private PendingMarketEdit(String stockId, int page, MarketEditStep step,
+        private PendingMarketEdit(MarketType marketType, String stockId, int page, MarketEditStep step,
                 UUID targetPlayerId, String targetPlayerName) {
+            this.marketType = marketType;
             this.stockId = stockId;
             this.page = page;
             this.step = step;
