@@ -165,6 +165,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulMaceKey;
     private NamespacedKey deathsHeadKey;
     private NamespacedKey stealerShardKey;
+    private NamespacedKey compactedStealerShardKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
     private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
@@ -229,6 +230,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulMaceKey = new NamespacedKey(this, "soul_mace");
         deathsHeadKey = new NamespacedKey(this, "deaths_head");
         stealerShardKey = new NamespacedKey(this, "stealer_shard");
+        compactedStealerShardKey = new NamespacedKey(this, "compacted_stealer_shard");
         registerCustomItemFactories();
         registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
@@ -1402,6 +1404,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 int deathsHeadRecipe = findDeathsHeadRecipe(holder.grid);
                 if (deathsHeadRecipe >= 0) {
                     craftDeathsHead(player, holder, deathsHeadRecipe);
+                } else if (isCompactedStealerShardRecipe(holder.grid)) {
+                    craftCompactedStealerShard(player, holder);
                 } else {
                     craftSoulMace(player, holder);
                 }
@@ -2913,6 +2917,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
         registerCustomItem("Death's Head", this::createDeathsHead, "deathshead");
         registerCustomItem("Stealer Shard", this::createStealerShard, "stealershard");
+        registerCustomItem("Compacted Stealer Shard", this::createCompactedStealerShard,
+                "compactedstealershard");
         registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("Soul Table", this::createSoulTable, "soultable");
@@ -3157,6 +3163,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             holder.inventory.setItem(53, createSoulMace());
         } else if (findDeathsHeadRecipe(holder.grid) >= 0) {
             holder.inventory.setItem(53, createDeathsHead());
+        } else if (isCompactedStealerShardRecipe(holder.grid)) {
+            holder.inventory.setItem(53, createCompactedStealerShard());
         } else {
             holder.inventory.setItem(53, createSoulTableButton("BARRIER",
                     ChatColor.RED + "Complete the 9x9 recipe"));
@@ -3263,6 +3271,26 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         renderSoulTable(holder);
     }
 
+    private void craftCompactedStealerShard(Player player, SoulTableHolder holder) {
+        if (!isCompactedStealerShardRecipe(holder.grid)) {
+            player.sendMessage(ChatColor.RED + "The Compacted Stealer Shard recipe is incomplete.");
+            return;
+        }
+
+        for (int slot = 0; slot < holder.grid.length; slot++) {
+            ItemStack ingredient = holder.grid[slot];
+            ingredient.setAmount(ingredient.getAmount() - 1);
+            if (ingredient.getAmount() <= 0) {
+                holder.grid[slot] = null;
+            }
+        }
+
+        Map<Integer, ItemStack> overflow = player.getInventory().addItem(createCompactedStealerShard());
+        overflow.values().forEach(item -> player.getWorld()
+                .dropItemNaturally(player.getLocation(), item));
+        renderSoulTable(holder);
+    }
+
     private int findDeathsHeadRecipe(ItemStack[] grid) {
         if (grid.length != 81) {
             return -1;
@@ -3324,6 +3352,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return true;
     }
 
+    private boolean isCompactedStealerShardRecipe(ItemStack[] grid) {
+        if (grid.length != 81) {
+            return false;
+        }
+        for (ItemStack ingredient : grid) {
+            if (!isStealerShard(ingredient)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private boolean isEmpty(ItemStack item) {
         return item == null || item.getType().isAir() || item.getAmount() <= 0;
     }
@@ -3369,6 +3409,19 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         ItemMeta meta = shard.getItemMeta();
         meta.setDisplayName(ChatColor.AQUA + "Stealer Shard");
         meta.getPersistentDataContainer().set(stealerShardKey, PersistentDataType.BYTE, (byte) 1);
+        shard.setItemMeta(meta);
+        return shard;
+    }
+
+    private ItemStack createCompactedStealerShard() {
+        ItemStack shard = XMaterial.matchXMaterial("PRISMARINE_SHARD")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Prismarine shard is unavailable"));
+        ItemMeta meta = shard.getItemMeta();
+        meta.setDisplayName(ChatColor.YELLOW + "Compacted Stealer Shard");
+        meta.getPersistentDataContainer().set(compactedStealerShardKey, PersistentDataType.BYTE, (byte) 1);
+        XEnchantment.matchXEnchantment("UNBREAKING")
+                .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
         shard.setItemMeta(meta);
         return shard;
     }
@@ -3934,6 +3987,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         return item.getItemMeta().getPersistentDataContainer()
                 .has(soulFragmentKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isStealerShard(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(stealerShardKey, PersistentDataType.BYTE);
     }
 
     private boolean isSoulTable(ItemStack item) {
