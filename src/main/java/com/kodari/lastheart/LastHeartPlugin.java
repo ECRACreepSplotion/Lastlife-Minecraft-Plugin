@@ -164,6 +164,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulTableRecipeKey;
     private NamespacedKey soulMaceKey;
     private NamespacedKey deathsHeadKey;
+    private NamespacedKey stealerShardKey;
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
     private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
@@ -227,6 +228,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulTableRecipeKey = new NamespacedKey(this, "soul_table_recipe");
         soulMaceKey = new NamespacedKey(this, "soul_mace");
         deathsHeadKey = new NamespacedKey(this, "deaths_head");
+        stealerShardKey = new NamespacedKey(this, "stealer_shard");
         registerCustomItemFactories();
         registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
@@ -672,7 +674,52 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 event.getLoot().add(createHeartRemover());
             }
         }
+        if ("chests/end_city_treasure".equals(lootTable)
+                && ThreadLocalRandom.current().nextDouble() < 0.50) {
+            addStealerShardsToLoot(event, rollEndCityStealerShardAmount());
+        }
         recordGeneratedLootLocations(event);
+    }
+
+    private int rollEndCityStealerShardAmount() {
+        int roll = ThreadLocalRandom.current().nextInt(100);
+        if (roll < 50) {
+            return 2;
+        }
+        if (roll < 80) {
+            return 4;
+        }
+        if (roll < 90) {
+            return 8;
+        }
+        if (roll < 95) {
+            return 16;
+        }
+        if (roll < 98) {
+            return 32;
+        }
+        return 64;
+    }
+
+    private void addStealerShardsToLoot(LootGenerateEvent event, int amount) {
+        InventoryHolder holder = event.getInventoryHolder();
+        int inventorySize = holder == null ? 27 : holder.getInventory().getSize();
+        int availableSlots = Math.max(0, inventorySize - event.getLoot().size());
+        if (amount <= availableSlots) {
+            for (int i = 0; i < amount; i++) {
+                event.getLoot().add(createStealerShard());
+            }
+            return;
+        }
+
+        int stackCount = ThreadLocalRandom.current().nextInt(1, Math.min(4, amount) + 1);
+        int baseAmount = amount / stackCount;
+        int remainder = amount % stackCount;
+        for (int i = 0; i < stackCount; i++) {
+            ItemStack stack = createStealerShard();
+            stack.setAmount(baseAmount + (i < remainder ? 1 : 0));
+            event.getLoot().add(stack);
+        }
     }
 
     private void recordGeneratedLootLocations(LootGenerateEvent event) {
@@ -890,10 +937,19 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onEnderDragonDeath(EntityDeathEvent event) {
-        if (!(event.getEntity() instanceof EnderDragon dragon)
-                || !isEmpoweredDragon(dragon)) {
+        if (!(event.getEntity() instanceof EnderDragon dragon)) {
             return;
         }
+
+        boolean empowered = isEmpoweredDragon(dragon);
+        if (!empowered) {
+            if (ThreadLocalRandom.current().nextDouble() < 0.30) {
+                event.getDrops().add(createStealerShardStack(rollDragonStealerShardAmount()));
+            }
+            return;
+        }
+
+        event.getDrops().add(createStealerShardStack(rollEmpoweredDragonStealerShardAmount()));
 
         Player killer = dragon.getKiller();
         if (killer != null) {
@@ -921,6 +977,37 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         } else {
             event.getDrops().add(createDragonArmor("NETHERITE_CHESTPLATE", "Chestplate", true));
         }
+    }
+
+    private int rollDragonStealerShardAmount() {
+        int roll = ThreadLocalRandom.current().nextInt(100);
+        if (roll < 90) {
+            return 8;
+        }
+        if (roll < 95) {
+            return 16;
+        }
+        if (roll < 98) {
+            return 32;
+        }
+        return 64;
+    }
+
+    private int rollEmpoweredDragonStealerShardAmount() {
+        int roll = ThreadLocalRandom.current().nextInt(100);
+        if (roll < 95) {
+            return 16;
+        }
+        if (roll < 98) {
+            return 32;
+        }
+        return 64;
+    }
+
+    private ItemStack createStealerShardStack(int amount) {
+        ItemStack shard = createStealerShard();
+        shard.setAmount(amount);
+        return shard;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -2825,6 +2912,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private void registerCustomItemFactories() {
         registerCustomItem("Demonic Initiator", this::createDemonicInitiator);
         registerCustomItem("Death's Head", this::createDeathsHead, "deathshead");
+        registerCustomItem("Stealer Shard", this::createStealerShard, "stealershard");
         registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("Soul Table", this::createSoulTable, "soultable");
@@ -3272,6 +3360,17 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         meta.getPersistentDataContainer().set(deathsHeadKey, PersistentDataType.BYTE, (byte) 1);
         head.setItemMeta(meta);
         return head;
+    }
+
+    private ItemStack createStealerShard() {
+        ItemStack shard = XMaterial.matchXMaterial("PRISMARINE_SHARD")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Prismarine shard is unavailable"));
+        ItemMeta meta = shard.getItemMeta();
+        meta.setDisplayName(ChatColor.AQUA + "Stealer Shard");
+        meta.getPersistentDataContainer().set(stealerShardKey, PersistentDataType.BYTE, (byte) 1);
+        shard.setItemMeta(meta);
+        return shard;
     }
 
     private ItemStack createSoulFragment() {
