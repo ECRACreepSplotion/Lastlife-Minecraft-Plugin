@@ -75,6 +75,7 @@ import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.inventory.SmithItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -86,6 +87,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.world.LootGenerateEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.EquipmentSlotGroup;
+import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -96,6 +98,7 @@ import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.inventory.SmithingTransformRecipe;
 import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.Damageable;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.Keyed;
@@ -166,6 +169,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey deathsHeadKey;
     private NamespacedKey stealerShardKey;
     private NamespacedKey compactedStealerShardKey;
+    private NamespacedKey soulStealerKey;
+    private NamespacedKey soulStealerRecipeKey;
+    private NamespacedKey soulStealerPenaltyModifierKey;
+    private NamespacedKey soulStealerBonusModifierKey;
+    private final Map<UUID, UUID> activeSoulStealerTargets = new HashMap<>();
+    private final Set<UUID> activeSoulStealerPlayers = new HashSet<>();
+    private final Set<UUID> activeSoulStealerPenalties = new HashSet<>();
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
     private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
@@ -231,6 +241,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         deathsHeadKey = new NamespacedKey(this, "deaths_head");
         stealerShardKey = new NamespacedKey(this, "stealer_shard");
         compactedStealerShardKey = new NamespacedKey(this, "compacted_stealer_shard");
+        soulStealerKey = new NamespacedKey(this, "soul_stealer");
+        soulStealerRecipeKey = new NamespacedKey(this, "soul_stealer_recipe");
+        soulStealerPenaltyModifierKey = new NamespacedKey(this, "soul_stealer_penalty");
+        soulStealerBonusModifierKey = new NamespacedKey(this, "soul_stealer_bonus");
         registerCustomItemFactories();
         registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
@@ -276,6 +290,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerDemonicInitiatorRecipe();
         registerHeartRemoverRecipe();
         registerSoulTableRecipe();
+        registerSoulStealerRecipe();
         Bukkit.getPluginManager().registerEvents(this, this);
         getCommand("heartunban").setExecutor(this);
         getCommand("sethearts").setExecutor(this);
@@ -309,11 +324,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @Override
     public void onDisable() {
         for (Player player : Bukkit.getOnlinePlayers()) {
+            removeSoulStealerModifier(player, soulStealerPenaltyModifierKey);
+            removeSoulStealerModifier(player, soulStealerBonusModifierKey);
             PermissionAttachment attachment = locatePermissionAttachments.remove(player.getUniqueId());
             if (attachment != null) {
                 player.removeAttachment(attachment);
             }
         }
+        activeSoulStealerTargets.clear();
+        activeSoulStealerPlayers.clear();
+        activeSoulStealerPenalties.clear();
         if (playerData != null) {
             savePlayerData();
         }
@@ -334,6 +354,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
+        refreshSoulStealerModifiers(event.getPlayer());
         applyMaxHealth(event.getPlayer(), false);
         refreshLocatePermission(event.getPlayer());
         List<String> marketNotifications = marketData.getStringList(
@@ -1306,6 +1327,173 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         });
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSoulStealerDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player attacker)
+                || !(event.getEntity() instanceof Player victim)
+                || !isSoulStealer(attacker.getInventory().getItemInMainHand())
+                || event.getFinalDamage() <= 0.0) {
+            return;
+        }
+
+        UUID attackerId = attacker.getUniqueId();
+        UUID victimId = victim.getUniqueId();
+        if (attackerId.equals(victimId)
+                || activeSoulStealerPlayers.contains(attackerId)
+                || activeSoulStealerPlayers.contains(victimId)) {
+            return;
+        }
+
+        activeSoulStealerPlayers.add(attackerId);
+        activeSoulStealerPlayers.add(victimId);
+        activeSoulStealerTargets.put(attackerId, victimId);
+        Bukkit.getScheduler().runTask(this, () -> {
+            if (!attacker.isOnline() || attacker.isDead() || !victim.isOnline() || victim.isDead()) {
+                endSoulStealerExtraction(attackerId, victimId);
+                return;
+            }
+
+            applySoulStealerModifier(attacker, soulStealerBonusModifierKey, 6.0);
+            AttributeInstance attackerMaxHealth = attacker.getAttribute(maxHealthAttribute);
+            if (attackerMaxHealth != null) {
+                attacker.setHealth(Math.min(attackerMaxHealth.getValue(), attacker.getHealth() + 6.0));
+            }
+
+            if (victim.getHealth() <= 3.0) {
+                victim.setHealth(0.0);
+            } else {
+                activeSoulStealerPenalties.add(victimId);
+                applySoulStealerModifier(victim, soulStealerPenaltyModifierKey, -6.0);
+            }
+            Bukkit.getScheduler().runTaskLater(this,
+                    () -> endSoulStealerExtraction(attackerId, victimId), 1200L);
+        });
+    }
+
+    private void endSoulStealerExtraction(UUID attackerId, UUID victimId) {
+        if (!victimId.equals(activeSoulStealerTargets.get(attackerId))) {
+            return;
+        }
+        activeSoulStealerTargets.remove(attackerId);
+        activeSoulStealerPlayers.remove(attackerId);
+        activeSoulStealerPlayers.remove(victimId);
+        activeSoulStealerPenalties.remove(victimId);
+        Player attacker = Bukkit.getPlayer(attackerId);
+        if (attacker != null) {
+            removeSoulStealerModifier(attacker, soulStealerBonusModifierKey);
+        }
+        Player victim = Bukkit.getPlayer(victimId);
+        if (victim != null) {
+            removeSoulStealerModifier(victim, soulStealerPenaltyModifierKey);
+        }
+    }
+
+    private void refreshSoulStealerModifiers(Player player) {
+        UUID playerId = player.getUniqueId();
+        if (activeSoulStealerTargets.containsKey(playerId)) {
+            applySoulStealerModifier(player, soulStealerBonusModifierKey, 6.0);
+        } else {
+            removeSoulStealerModifier(player, soulStealerBonusModifierKey);
+        }
+        if (activeSoulStealerPenalties.contains(playerId)) {
+            applySoulStealerModifier(player, soulStealerPenaltyModifierKey, -6.0);
+        } else {
+            removeSoulStealerModifier(player, soulStealerPenaltyModifierKey);
+        }
+    }
+
+    private void applySoulStealerModifier(Player player, NamespacedKey key, double amount) {
+        AttributeInstance attribute = player.getAttribute(maxHealthAttribute);
+        if (attribute == null) {
+            return;
+        }
+        removeSoulStealerModifier(player, key);
+        attribute.addModifier(new AttributeModifier(
+                key, amount, AttributeModifier.Operation.ADD_NUMBER, EquipmentSlotGroup.ANY));
+        if (player.getHealth() > attribute.getValue()) {
+            player.setHealth(attribute.getValue());
+        }
+    }
+
+    private void removeSoulStealerModifier(Player player, NamespacedKey key) {
+        AttributeInstance attribute = player.getAttribute(maxHealthAttribute);
+        if (attribute == null) {
+            return;
+        }
+        for (AttributeModifier modifier : new ArrayList<>(attribute.getModifiers())) {
+            if (key.equals(modifier.getKey())) {
+                attribute.removeModifier(modifier);
+            }
+        }
+        if (!player.isDead() && player.getHealth() > attribute.getValue()) {
+            player.setHealth(attribute.getValue());
+        }
+    }
+
+    private int getSoulStealerBreachLevel(ItemStack book) {
+        if (book == null || !book.hasItemMeta()
+                || !(book.getItemMeta() instanceof EnchantmentStorageMeta bookMeta)) {
+            return 0;
+        }
+        return XEnchantment.matchXEnchantment("BREACH")
+                .map(enchantment -> bookMeta.getStoredEnchantLevel(enchantment.getEnchant()))
+                .orElse(0);
+    }
+
+    private void applySoulStealerBreach(ItemStack item, int level) {
+        XEnchantment.matchXEnchantment("BREACH").ifPresent(enchantment -> {
+            ItemMeta meta = item.getItemMeta();
+            int combinedLevel = Math.max(meta.getEnchantLevel(enchantment.getEnchant()), level);
+            meta.addEnchant(enchantment.getEnchant(), combinedLevel, true);
+            item.setItemMeta(meta);
+        });
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onSoulStealerAnvilClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)
+                || event.getRawSlot() != 2
+                || !(event.getView().getTopInventory() instanceof AnvilInventory inventory)) {
+            return;
+        }
+        ItemStack stealer = inventory.getItem(0);
+        ItemStack book = inventory.getItem(1);
+        int breachLevel = getSoulStealerBreachLevel(book);
+        if (!isSoulStealer(stealer) || breachLevel <= 0) {
+            return;
+        }
+
+        event.setCancelled(true);
+        boolean creative = player.getGameMode() == org.bukkit.GameMode.CREATIVE;
+        if (!creative && player.getLevel() < 5) {
+            return;
+        }
+        ItemStack result = event.getCurrentItem();
+        result = result == null || !isSoulStealer(result) ? stealer.clone() : result.clone();
+        applySoulStealerBreach(result, breachLevel);
+        if (!creative) {
+            player.setLevel(player.getLevel() - 5);
+        }
+        inventory.setItem(0, null);
+        if (book.getAmount() <= 1) {
+            inventory.setItem(1, null);
+        } else {
+            book.setAmount(book.getAmount() - 1);
+            inventory.setItem(1, book);
+        }
+        inventory.setItem(2, null);
+        inventory.setRepairCost(0);
+        ItemStack cursor = event.getCursor();
+        if (cursor == null || cursor.getType().isAir()) {
+            event.setCursor(result);
+        } else {
+            Map<Integer, ItemStack> overflow = player.getInventory().addItem(result);
+            overflow.values().forEach(item -> player.getWorld()
+                    .dropItemNaturally(player.getLocation(), item));
+        }
+        player.updateInventory();
+    }
+
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         if (event.getView().getTopInventory().getHolder() instanceof MarketMenuHolder holder) {
@@ -1478,6 +1666,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     ? createHeartRemover()
                     : null);
         }
+    }
+
+    @EventHandler
+    public void onPrepareSoulStealerAnvil(PrepareAnvilEvent event) {
+        AnvilInventory inventory = event.getInventory();
+        ItemStack stealer = inventory.getItem(0);
+        int breachLevel = getSoulStealerBreachLevel(inventory.getItem(1));
+        if (!isSoulStealer(stealer) || breachLevel <= 0) {
+            return;
+        }
+
+        ItemStack result = event.getResult();
+        result = result == null || !isSoulStealer(result) ? stealer.clone() : result.clone();
+        applySoulStealerBreach(result, breachLevel);
+        event.setResult(result);
+        inventory.setRepairCost(5);
     }
 
     @EventHandler
@@ -2919,6 +3123,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerCustomItem("Stealer Shard", this::createStealerShard, "stealershard");
         registerCustomItem("Compacted Stealer Shard", this::createCompactedStealerShard,
                 "compactedstealershard");
+        registerCustomItem("The Soul Stealer", this::createSoulStealer, "soulstealer");
         registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("Soul Table", this::createSoulTable, "soultable");
@@ -3116,6 +3321,17 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 new RecipeChoice.MaterialChoice(trimTemplate),
                 new RecipeChoice.MaterialChoice(craftingTable),
                 new RecipeChoice.MaterialChoice(netheriteIngot));
+        Bukkit.addRecipe(recipe);
+    }
+
+    private void registerSoulStealerRecipe() {
+        Bukkit.removeRecipe(soulStealerRecipeKey);
+        ShapedRecipe recipe = new ShapedRecipe(soulStealerRecipeKey, createSoulStealer());
+        recipe.shape("C", "C", "S");
+        recipe.setIngredient('C', new RecipeChoice.ExactChoice(createCompactedStealerShard()));
+        recipe.setIngredient('S', XMaterial.matchXMaterial("STICK")
+                .map(XMaterial::parseMaterial)
+                .orElseThrow(() -> new IllegalStateException("Stick is unavailable")));
         Bukkit.addRecipe(recipe);
     }
 
@@ -3424,6 +3640,22 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 .ifPresent(enchantment -> meta.addEnchant(enchantment.getEnchant(), 1, true));
         shard.setItemMeta(meta);
         return shard;
+    }
+
+    private ItemStack createSoulStealer() {
+        ItemStack sword = XMaterial.matchXMaterial("DIAMOND_SWORD")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Diamond sword is unavailable"));
+        ItemMeta meta = sword.getItemMeta();
+        meta.setDisplayName(ChatColor.DARK_PURPLE + "The Soul Stealer");
+        meta.setLore(List.of(
+                ChatColor.GOLD + "Passive Ability: Extraction",
+                ChatColor.GRAY + "Steal 3 hearts from the player for 1 minute.",
+                ChatColor.GRAY + "They cannot heal those hearts back until the minute is over.",
+                ChatColor.GRAY + "You also gain 3 hearts for 1 minute before they are taken away."));
+        meta.getPersistentDataContainer().set(soulStealerKey, PersistentDataType.BYTE, (byte) 1);
+        sword.setItemMeta(meta);
+        return sword;
     }
 
     private ItemStack createSoulFragment() {
@@ -3995,6 +4227,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         return item.getItemMeta().getPersistentDataContainer()
                 .has(stealerShardKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isSoulStealer(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return false;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .has(soulStealerKey, PersistentDataType.BYTE);
     }
 
     private boolean isSoulTable(ItemStack item) {
