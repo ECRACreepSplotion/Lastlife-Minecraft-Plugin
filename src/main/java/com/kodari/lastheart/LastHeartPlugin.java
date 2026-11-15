@@ -176,6 +176,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private final Map<UUID, UUID> activeSoulStealerTargets = new HashMap<>();
     private final Set<UUID> activeSoulStealerPlayers = new HashSet<>();
     private final Set<UUID> activeSoulStealerPenalties = new HashSet<>();
+    private final Set<UUID> pendingSoulStealerTotemBypass = new HashSet<>();
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
     private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
@@ -334,6 +335,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         activeSoulStealerTargets.clear();
         activeSoulStealerPlayers.clear();
         activeSoulStealerPenalties.clear();
+        pendingSoulStealerTotemBypass.clear();
         if (playerData != null) {
             savePlayerData();
         }
@@ -1344,6 +1346,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             return;
         }
 
+        if (getHearts(victimId) <= 3) {
+            pendingSoulStealerTotemBypass.add(victimId);
+            Bukkit.getScheduler().runTaskLater(this,
+                    () -> pendingSoulStealerTotemBypass.remove(victimId), 1L);
+        }
         activeSoulStealerPlayers.add(attackerId);
         activeSoulStealerPlayers.add(victimId);
         activeSoulStealerTargets.put(attackerId, victimId);
@@ -1817,9 +1824,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlayerResurrect(EntityResurrectEvent event) {
         if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+        if (pendingSoulStealerTotemBypass.remove(player.getUniqueId())) {
+            event.setCancelled(true);
             return;
         }
 
@@ -3205,9 +3216,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 + (isDragonChestplate(player.getInventory().getChestplate()) ? 20.0 : 0.0);
         attribute.setBaseValue(maxHealth);
         if (restoreHealth) {
-            player.setHealth(maxHealth);
-        } else if (player.getHealth() > maxHealth) {
-            player.setHealth(maxHealth);
+            player.setHealth(attribute.getValue());
+        } else if (player.getHealth() > attribute.getValue()) {
+            player.setHealth(attribute.getValue());
         }
         refreshWardenLeggingsEffects(player);
         refreshDragonChestplateEffects(player);
