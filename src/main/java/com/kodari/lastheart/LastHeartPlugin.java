@@ -179,6 +179,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private final Set<UUID> activeSoulStealerPlayers = new HashSet<>();
     private final Set<UUID> activeSoulStealerPenalties = new HashSet<>();
     private final Set<UUID> pendingSoulStealerTotemBypass = new HashSet<>();
+    private final Set<UUID> pendingSoulStealerDeaths = new HashSet<>();
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
     private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
@@ -575,7 +576,20 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         UUID playerId = player.getUniqueId();
         int hearts = getHearts(playerId);
 
-        if (ThreadLocalRandom.current().nextDouble() < Math.min(0.30, hearts * 0.03)) {
+        Player killer = player.getKiller();
+        boolean killedBySoulStealer = pendingSoulStealerDeaths.remove(playerId)
+                || (killer != null && isSoulStealer(killer.getInventory().getItemInMainHand()));
+        if (killedBySoulStealer) {
+            double roll = ThreadLocalRandom.current().nextDouble();
+            int amount = roll < 0.50 ? 2
+                    : roll < 0.80 ? 3
+                    : roll < 0.95 ? 4
+                    : roll < 0.98 ? 5
+                    : 10;
+            ItemStack fragments = createSoulFragment();
+            fragments.setAmount(amount);
+            event.getDrops().add(fragments);
+        } else if (ThreadLocalRandom.current().nextDouble() < Math.min(0.30, hearts * 0.03)) {
             event.getDrops().add(createSoulFragment());
         }
 
@@ -1382,6 +1396,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
 
             if (victimMaxHearts <= 3) {
+                pendingSoulStealerDeaths.add(victimId);
                 victim.setHealth(0.0);
             } else {
                 activeSoulStealerPenalties.add(victimId);
@@ -1412,12 +1427,31 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         int bypasses = tauntingLevel;
         while (bypasses > 0) {
+            EquipmentSlot hand;
+            ItemStack heldTotem;
             if (isTotemOfUndying(victim.getInventory().getItemInMainHand())) {
-                consumeHeldItem(victim, EquipmentSlot.HAND);
+                hand = EquipmentSlot.HAND;
+                heldTotem = victim.getInventory().getItemInMainHand();
             } else if (isTotemOfUndying(victim.getInventory().getItemInOffHand())) {
-                consumeHeldItem(victim, EquipmentSlot.OFF_HAND);
+                hand = EquipmentSlot.OFF_HAND;
+                heldTotem = victim.getInventory().getItemInOffHand();
             } else {
                 break;
+            }
+
+            if (isEvolvedTotem(heldTotem)) {
+                ItemMeta meta = heldTotem.getItemMeta();
+                int uses = meta.getPersistentDataContainer().getOrDefault(
+                        evolvedTotemUsesKey, PersistentDataType.INTEGER, 1);
+                if (uses > 1) {
+                    meta.getPersistentDataContainer().set(
+                            evolvedTotemUsesKey, PersistentDataType.INTEGER, uses - 1);
+                    heldTotem.setItemMeta(meta);
+                } else {
+                    consumeHeldItem(victim, hand);
+                }
+            } else {
+                consumeHeldItem(victim, hand);
             }
             bypasses--;
         }
@@ -3318,6 +3352,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         registerCustomItem("Compacted Stealer Shard", this::createCompactedStealerShard,
                 "compactedstealershard");
         registerCustomItem("The Soul Stealer", this::createSoulStealer, "soulstealer");
+        registerCustomItem("Totem Taunting I", () -> createTotemTauntingBook(1), "totemtaunting1");
+        registerCustomItem("Totem Taunting II", () -> createTotemTauntingBook(2), "totemtaunting2");
         registerCustomItem("Soul Fragments", this::createSoulFragment, "soulfragment");
         registerCustomItem("Heart Remover", this::createHeartRemover, "heartremover");
         registerCustomItem("Soul Table", this::createSoulTable, "soultable");
