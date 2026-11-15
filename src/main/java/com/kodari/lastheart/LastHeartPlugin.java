@@ -173,6 +173,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey soulStealerRecipeKey;
     private NamespacedKey soulStealerPenaltyModifierKey;
     private NamespacedKey soulStealerBonusModifierKey;
+    private NamespacedKey totemTauntingBookKey;
+    private NamespacedKey totemTauntingKey;
     private final Map<UUID, UUID> activeSoulStealerTargets = new HashMap<>();
     private final Set<UUID> activeSoulStealerPlayers = new HashSet<>();
     private final Set<UUID> activeSoulStealerPenalties = new HashSet<>();
@@ -246,6 +248,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         soulStealerRecipeKey = new NamespacedKey(this, "soul_stealer_recipe");
         soulStealerPenaltyModifierKey = new NamespacedKey(this, "soul_stealer_penalty");
         soulStealerBonusModifierKey = new NamespacedKey(this, "soul_stealer_bonus");
+        totemTauntingBookKey = new NamespacedKey(this, "totem_taunting_book");
+        totemTauntingKey = new NamespacedKey(this, "totem_taunting");
         registerCustomItemFactories();
         registerAdvancement(lastLifeRootAdvancementKey, "advancements/lastlife_root.json");
         registerAdvancement(soulGatheringAdvancementKey, "advancements/soul_gathering.json");
@@ -684,9 +688,20 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (chance > 0.0 && ThreadLocalRandom.current().nextDouble() < chance) {
             event.getLoot().add(createSoulFragment());
         }
-        if ("chests/ruined_portal".equals(lootTable)
-                && ThreadLocalRandom.current().nextDouble() < 0.02) {
-            event.getLoot().add(createHeartRemover());
+        if ("chests/ruined_portal".equals(lootTable)) {
+            if (ThreadLocalRandom.current().nextDouble() < 0.02) {
+                event.getLoot().add(createHeartRemover());
+            }
+            Location location = event.getLootContext().getLocation();
+            if (location != null && location.getWorld() != null
+                    && location.getWorld().getEnvironment() == World.Environment.NETHER
+                    && ThreadLocalRandom.current().nextDouble() < 0.01) {
+                event.getLoot().add(createTotemTauntingBook(2));
+            }
+        }
+        if ("chests/woodland_mansion".equals(lootTable)
+                && ThreadLocalRandom.current().nextDouble() < 0.01) {
+            event.getLoot().add(createTotemTauntingBook(1));
         }
         if (bastionChest) {
             if (isBastionLootTable(lootTable, "treasure")) {
@@ -1333,8 +1348,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     public void onSoulStealerDamage(EntityDamageByEntityEvent event) {
         if (!(event.getDamager() instanceof Player attacker)
                 || !(event.getEntity() instanceof Player victim)
-                || !isSoulStealer(attacker.getInventory().getItemInMainHand())
-                || event.getFinalDamage() <= 0.0) {
+                || !isSoulStealer(attacker.getInventory().getItemInMainHand())) {
             return;
         }
 
@@ -1346,7 +1360,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             return;
         }
 
-        if (getHearts(victimId) <= 3) {
+        int victimMaxHearts = getHearts(victimId);
+        if (victimMaxHearts <= 3) {
             pendingSoulStealerTotemBypass.add(victimId);
             Bukkit.getScheduler().runTaskLater(this,
                     () -> pendingSoulStealerTotemBypass.remove(victimId), 1L);
@@ -1366,7 +1381,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 attacker.setHealth(Math.min(attackerMaxHealth.getValue(), attacker.getHealth() + 6.0));
             }
 
-            if (victim.getHealth() <= 3.0) {
+            if (victimMaxHearts <= 3) {
                 victim.setHealth(0.0);
             } else {
                 activeSoulStealerPenalties.add(victimId);
@@ -1375,6 +1390,37 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             Bukkit.getScheduler().runTaskLater(this,
                     () -> endSoulStealerExtraction(attackerId, victimId), 1200L);
         });
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onTotemTauntingDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player attacker)
+                || !(event.getEntity() instanceof Player victim)) {
+            return;
+        }
+
+        ItemStack weapon = attacker.getInventory().getItemInMainHand();
+        int tauntingLevel = getTotemTauntingLevel(weapon);
+        if (tauntingLevel <= 0
+                || (isSoulStealer(weapon) && getHearts(victim.getUniqueId()) <= 3)) {
+            return;
+        }
+
+        if (event.getFinalDamage() < victim.getHealth()) {
+            return;
+        }
+
+        int bypasses = tauntingLevel;
+        while (bypasses > 0) {
+            if (isTotemOfUndying(victim.getInventory().getItemInMainHand())) {
+                consumeHeldItem(victim, EquipmentSlot.HAND);
+            } else if (isTotemOfUndying(victim.getInventory().getItemInOffHand())) {
+                consumeHeldItem(victim, EquipmentSlot.OFF_HAND);
+            } else {
+                break;
+            }
+            bypasses--;
+        }
     }
 
     private void endSoulStealerExtraction(UUID attackerId, UUID victimId) {
@@ -1454,6 +1500,143 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             meta.addEnchant(enchantment.getEnchant(), combinedLevel, true);
             item.setItemMeta(meta);
         });
+    }
+
+    private ItemStack createTotemTauntingBook(int level) {
+        ItemStack book = XMaterial.matchXMaterial("ENCHANTED_BOOK")
+                .map(XMaterial::parseItem)
+                .orElseThrow(() -> new IllegalStateException("Enchanted book is unavailable"));
+        ItemMeta meta = book.getItemMeta();
+        String numeral = level == 2 ? "II" : "I";
+        meta.setDisplayName(ChatColor.LIGHT_PURPLE + "Totem Taunting " + numeral);
+        meta.getPersistentDataContainer().set(totemTauntingBookKey, PersistentDataType.INTEGER, level);
+        book.setItemMeta(meta);
+        return book;
+    }
+
+    private int getTotemTauntingBookLevel(ItemStack book) {
+        if (book == null || book.getType().isAir() || !book.hasItemMeta()) {
+            return 0;
+        }
+        return book.getItemMeta().getPersistentDataContainer()
+                .getOrDefault(totemTauntingBookKey, PersistentDataType.INTEGER, 0);
+    }
+
+    private int getTotemTauntingLevel(ItemStack item) {
+        if (item == null || item.getType().isAir() || !item.hasItemMeta()) {
+            return 0;
+        }
+        return item.getItemMeta().getPersistentDataContainer()
+                .getOrDefault(totemTauntingKey, PersistentDataType.INTEGER, 0);
+    }
+
+    private boolean isEnchantedBook(ItemStack item) {
+        return item != null && XMaterial.matchXMaterial("ENCHANTED_BOOK")
+                .map(material -> item.getType() == material.parseMaterial())
+                .orElse(false);
+    }
+
+    private void applyTotemTaunting(ItemStack item, int level) {
+        ItemMeta meta = item.getItemMeta();
+        meta.getPersistentDataContainer().set(totemTauntingKey, PersistentDataType.INTEGER, level);
+        List<String> lore = meta.getLore() == null
+                ? new ArrayList<>()
+                : new ArrayList<>(meta.getLore());
+        lore.removeIf(line -> line.startsWith(ChatColor.DARK_PURPLE + "Totem Taunting "));
+        lore.add(ChatColor.DARK_PURPLE + "Totem Taunting " + (level == 2 ? "II" : "I"));
+        meta.setLore(lore);
+        item.setItemMeta(meta);
+    }
+
+    @EventHandler
+    public void onPrepareTotemTauntingAnvil(PrepareAnvilEvent event) {
+        AnvilInventory inventory = event.getInventory();
+        ItemStack target = inventory.getItem(0);
+        ItemStack firstBook = inventory.getItem(0);
+        ItemStack secondBook = inventory.getItem(1);
+        int firstBookLevel = getTotemTauntingBookLevel(firstBook);
+        int secondBookLevel = getTotemTauntingBookLevel(secondBook);
+        if (firstBookLevel <= 0 && secondBookLevel <= 0) {
+            return;
+        }
+        if (firstBookLevel > 0 || target == null || target.getType().isAir()
+                || isEnchantedBook(target) || secondBookLevel <= 0) {
+            event.setResult(null);
+            inventory.setRepairCost(0);
+            return;
+        }
+
+        if (getTotemTauntingLevel(target) >= secondBookLevel) {
+            event.setResult(null);
+            inventory.setRepairCost(0);
+            return;
+        }
+
+        ItemStack result = target.clone();
+        result.setAmount(1);
+        applyTotemTaunting(result, secondBookLevel);
+        event.setResult(result);
+        inventory.setRepairCost(5);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onTotemTauntingAnvilClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)
+                || event.getRawSlot() != 2
+                || !(event.getView().getTopInventory() instanceof AnvilInventory inventory)) {
+            return;
+        }
+
+        ItemStack target = inventory.getItem(0);
+        ItemStack book = inventory.getItem(1);
+        int bookLevel = getTotemTauntingBookLevel(book);
+        if (bookLevel <= 0) {
+            if (getTotemTauntingBookLevel(target) > 0) {
+                event.setCancelled(true);
+            }
+            return;
+        }
+        if (target == null || target.getType().isAir() || isEnchantedBook(target)
+                || getTotemTauntingLevel(target) >= bookLevel) {
+            event.setCancelled(true);
+            return;
+        }
+
+        event.setCancelled(true);
+        boolean creative = player.getGameMode() == org.bukkit.GameMode.CREATIVE;
+        if (!creative && player.getLevel() < 5) {
+            return;
+        }
+
+        ItemStack result = target.clone();
+        result.setAmount(1);
+        applyTotemTaunting(result, bookLevel);
+        if (!creative) {
+            player.setLevel(player.getLevel() - 5);
+        }
+        if (target.getAmount() <= 1) {
+            inventory.setItem(0, null);
+        } else {
+            target.setAmount(target.getAmount() - 1);
+            inventory.setItem(0, target);
+        }
+        if (book.getAmount() <= 1) {
+            inventory.setItem(1, null);
+        } else {
+            book.setAmount(book.getAmount() - 1);
+            inventory.setItem(1, book);
+        }
+        inventory.setItem(2, null);
+        inventory.setRepairCost(0);
+        ItemStack cursor = event.getCursor();
+        if (cursor == null || cursor.getType().isAir()) {
+            event.setCursor(result);
+        } else {
+            Map<Integer, ItemStack> overflow = player.getInventory().addItem(result);
+            overflow.values().forEach(item -> player.getWorld()
+                    .dropItemNaturally(player.getLocation(), item));
+        }
+        player.updateInventory();
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
