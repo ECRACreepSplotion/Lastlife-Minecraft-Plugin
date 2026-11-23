@@ -1,0 +1,1 @@
+{"parent":"lastlife:down_with_the_ship","display":{"icon":{"id":"minecraft:shield"},"title":{"text":"Surviving The Titanic"},"description":{"text":"Survive The Creeper Captain's explosion."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

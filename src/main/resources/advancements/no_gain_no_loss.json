@@ -1,0 +1,1 @@
+{"parent":"lastlife:successful_sacrifice","display":{"icon":{"id":"minecraft:wither_skeleton_skull"},"title":{"text":"No Gain, No Loss"},"description":{"text":"Receive one Heart Remover from a sacrifice."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

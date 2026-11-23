@@ -1,0 +1,1 @@
+{"parent":"lastlife:lets_go_gambling","display":{"icon":{"id":"minecraft:wither_skeleton_skull"},"title":{"text":"Deal With The Devil"},"description":{"text":"Sacrifice a life in the Life Market."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

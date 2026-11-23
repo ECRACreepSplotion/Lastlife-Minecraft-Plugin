@@ -1,0 +1,1 @@
+{"parent":"lastlife:wait_it_scammed_me","display":{"icon":{"id":"minecraft:dragon_head"},"title":{"text":"Big Criminal Boss"},"description":{"text":"Be killed by _________."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

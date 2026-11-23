@@ -1,0 +1,1 @@
+{"parent":"lastlife:down_with_the_ship","display":{"icon":{"id":"minecraft:creeper_head"},"title":{"text":"I'm Actually Left Handed"},"description":{"text":"Kill The Creeper's Right Hand Man."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

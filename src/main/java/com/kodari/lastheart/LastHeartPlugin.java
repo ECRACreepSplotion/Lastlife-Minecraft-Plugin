@@ -315,7 +315,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         for (String name : Arrays.asList("successful_heist", "factory_reset", "extract_me_their_souls",
                 "tax_collector", "its_only_april_14th", "government_approved_bankruptcy", "indefinite_debt",
                 "totem_mockery", "ii_totem_mockery", "irs_at_your_door", "it_actually_worked",
-                "no_hope_for_you_now", "justice_is_served", "the_jury_has_spoken")) {
+                "no_hope_for_you_now", "justice_is_served", "the_jury_has_spoken",
+                "down_with_the_ship", "im_actually_left_handed", "surviving_the_titanic", "fist_bump",
+                "lets_go_gambling", "quick_before_its_patched", "already_addicted", "wait_it_scammed_me",
+                "big_criminal_boss", "deal_with_the_devil", "successful_sacrifice", "no_gain_no_loss",
+                "one_step_closer_to_hell")) {
             registerAdvancement(new NamespacedKey(this, name), "advancements/" + name + ".json");
         }
 
@@ -687,6 +691,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         boolean killedByPursuer = marketPursuitKills.remove(playerId);
         if (killedByPursuer) {
+            awardAdvancement(player, new NamespacedKey(this, "big_criminal_boss"));
             event.setDeathMessage(player.getName() + " was slain by _________");
             event.setKeepInventory(false);
             player.getInventory().clear();
@@ -1502,7 +1507,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         UUID attackerId = attacker.getUniqueId();
         UUID victimId = victim.getUniqueId();
-        if (event.getFinalDamage() > 20.0) {
+        if (event.getDamage() > 20.0) {
             awardAdvancement(attacker, new NamespacedKey(this, "indefinite_debt"));
         }
         if (attackerId.equals(victimId)
@@ -2491,6 +2496,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
     }
 
+    @EventHandler
+    public void onCreeperBossDeath(EntityDeathEvent event) {
+        if (!(event.getEntity() instanceof Creeper creeper) || creeper.getKiller() == null) return;
+        if (isCreeperCaptain(creeper)) {
+            awardAdvancement(creeper.getKiller(), new NamespacedKey(this, "down_with_the_ship"));
+        } else if (isCreeperRightHand(creeper)) {
+            awardAdvancement(creeper.getKiller(), new NamespacedKey(this, "im_actually_left_handed"));
+        }
+    }
+
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onCreeperCaptainExplosion(ExplosionPrimeEvent event) {
         if (!(event.getEntity() instanceof Creeper captain)
@@ -2510,6 +2525,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     player.damage(damage, captain);
                 } finally {
                     applyingRightHandExplosionDamage = previous;
+                }
+                if (!player.isDead() && player.getHealth() > 0.0) {
+                    awardAdvancement(player, new NamespacedKey(this,
+                            isCreeperRightHand(captain) ? "fist_bump" : "surviving_the_titanic"));
                 }
             }
         }
@@ -2884,6 +2903,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private void sacrificeLives(Player player, int amount) {
         UUID id = player.getUniqueId();
+        awardAdvancement(player, new NamespacedKey(this, "lets_go_gambling"));
+        awardAdvancement(player, new NamespacedKey(this, "deal_with_the_devil"));
         int hearts = getHearts(id);
         int removers = 0;
         int processed = 0;
@@ -2894,6 +2915,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             if (roll >= 90) {
                 continue;
             }
+            awardAdvancement(player, new NamespacedKey(this, roll < 30 ? "no_gain_no_loss"
+                    : roll < 60 ? "successful_sacrifice" : "one_step_closer_to_hell"));
             removers += roll < 30 ? 1 : roll < 60 ? 2 : 0;
             if (hearts >= MAX_HEARTS) {
                 banned = true;
@@ -2943,11 +2966,17 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
         }
         ItemStack input = cursor.clone();
+        awardAdvancement(player, new NamespacedKey(this, "lets_go_gambling"));
+        awardAdvancement(player, new NamespacedKey(this, "quick_before_its_patched"));
         input.setAmount(1);
         ItemStack remaining = cursor.clone();
         remaining.setAmount(cursor.getAmount() - 1);
         event.setCursor(remaining.getAmount() == 0 ? null : remaining);
         int roll = ThreadLocalRandom.current().nextInt(100);
+        if (roll < 98) {
+            awardAdvancement(player, new NamespacedKey(this,
+                    roll < 49 ? "already_addicted" : "wait_it_scammed_me"));
+        }
         int returned = roll < 49 ? 2 : roll < 98 ? 0 : 1;
         for (int i = 0; i < returned; i++) {
             Map<Integer, ItemStack> overflow = player.getInventory().addItem(input.clone());

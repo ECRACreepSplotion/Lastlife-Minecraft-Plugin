@@ -1,0 +1,1 @@
+{"parent":"lastlife:a_heros_reward","display":{"icon":{"id":"minecraft:creeper_head"},"title":{"text":"Down With The Ship"},"description":{"text":"Kill The Creeper Captain."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

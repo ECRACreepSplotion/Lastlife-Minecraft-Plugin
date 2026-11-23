@@ -1,0 +1,1 @@
+{"parent":"lastlife:quick_before_its_patched","display":{"icon":{"id":"minecraft:diamond"},"title":{"text":"Already Addicted"},"description":{"text":"Duplicate an item in the Duping Market."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

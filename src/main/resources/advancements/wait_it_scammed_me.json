@@ -1,0 +1,1 @@
+{"parent":"lastlife:already_addicted","display":{"icon":{"id":"minecraft:barrier"},"title":{"text":"Wait! It Scammed Me!"},"description":{"text":"Lose an item in the Duping Market."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

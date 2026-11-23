@@ -1,0 +1,1 @@
+{"parent":"lastlife:deal_with_the_devil","display":{"icon":{"id":"minecraft:wither_skeleton_skull"},"title":{"text":"Successful Sacrifice!"},"description":{"text":"Receive two Heart Removers from one sacrifice."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

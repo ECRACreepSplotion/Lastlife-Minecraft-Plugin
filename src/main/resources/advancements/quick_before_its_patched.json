@@ -1,0 +1,1 @@
+{"parent":"lastlife:lets_go_gambling","display":{"icon":{"id":"minecraft:ender_chest"},"title":{"text":"Quick Before It's Patched!"},"description":{"text":"Put an item in the Duping Market.","color":"gray"},"frame":"task","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

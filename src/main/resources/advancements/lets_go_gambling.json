@@ -1,0 +1,1 @@
+{"parent":"lastlife:soul_gathering","display":{"icon":{"id":"minecraft:emerald"},"title":{"text":"Let's Go Gambling!"},"description":{"text":"Use a Black Market.","color":"gray"},"frame":"task","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

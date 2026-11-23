@@ -1,0 +1,1 @@
+{"parent":"lastlife:im_actually_left_handed","display":{"icon":{"id":"minecraft:shield"},"title":{"text":"Fist Bump?"},"description":{"text":"Survive The Creeper's Right Hand Man's explosion."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}
