@@ -195,6 +195,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private final Set<UUID> pendingSoulStealerDeaths = new HashSet<>();
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> pendingLifeSacrifices = new ConcurrentHashMap<>();
     private final Map<UUID, PendingMarketEdit> pendingMarketEdits = new ConcurrentHashMap<>();
     private final Map<UUID, String> marketEditStockSelections = new ConcurrentHashMap<>();
     private final Map<UUID, MarketType> marketEditMarketSelections = new ConcurrentHashMap<>();
@@ -419,6 +420,46 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onMarketPurchaseChat(AsyncPlayerChatEvent event) {
         UUID playerId = event.getPlayer().getUniqueId();
+        Integer confirmations = pendingLifeSacrifices.get(playerId);
+        if (confirmations != null) {
+            event.setCancelled(true);
+            String message = event.getMessage().trim();
+            Bukkit.getScheduler().runTask(this, () -> {
+                if (!pendingLifeSacrifices.containsKey(playerId)) {
+                    return;
+                }
+                Player player = Bukkit.getPlayer(playerId);
+                if (player == null) {
+                    pendingLifeSacrifices.remove(playerId);
+                    return;
+                }
+                if (message.equalsIgnoreCase("cancel")) {
+                    pendingLifeSacrifices.remove(playerId);
+                    player.sendMessage(ChatColor.YELLOW + "Life sacrifice cancelled.");
+                    return;
+                }
+                int amount;
+                try {
+                    amount = Integer.parseInt(message);
+                    if (amount < 1) {
+                        throw new NumberFormatException();
+                    }
+                } catch (NumberFormatException exception) {
+                    player.sendMessage(ChatColor.RED + "Enter a positive whole number, or type cancel.");
+                    return;
+                }
+                int stage = pendingLifeSacrifices.get(playerId);
+                if (amount >= MAX_HEARTS - getHearts(playerId) + 1 && stage < 3) {
+                    pendingLifeSacrifices.put(playerId, stage + 1);
+                    player.sendMessage(ChatColor.RED + (stage == 0 ? "Can you please repeat that?"
+                            : stage == 1 ? "Repeat that one more time" : "One more time?"));
+                    return;
+                }
+                pendingLifeSacrifices.remove(playerId);
+                sacrificeLives(player, amount);
+            });
+            return;
+        }
         if (pendingMarketEdits.containsKey(playerId)) {
             return;
         }
@@ -1834,8 +1875,20 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
                 return;
             }
-            if (holder.view == MarketView.BLACK_MARKET_SELECT && event.getRawSlot() == 13) {
+            if (holder.view == MarketView.BLACK_MARKET_SELECT && event.getRawSlot() == 11) {
                 openDupingMarket(player);
+            } else if (holder.view == MarketView.BLACK_MARKET_SELECT && event.getRawSlot() == 15) {
+                openLifeMarket(player);
+            } else if (holder.view == MarketView.LIFE_MARKET && event.getRawSlot() == 11) {
+                if (getHearts(player.getUniqueId()) >= MAX_HEARTS) {
+                    promptLifeSacrifice(player);
+                } else {
+                    sacrificeLives(player, 1);
+                }
+            } else if (holder.view == MarketView.LIFE_MARKET && event.getRawSlot() == 15) {
+                promptLifeSacrifice(player);
+            } else if (holder.view == MarketView.LIFE_MARKET && event.getRawSlot() == 22) {
+                openBlackMarketSelector(player);
             } else if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 11) {
                 openMarketStocks(player, MarketType.GOLD, 0, holder.editMode);
             } else if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 15) {
@@ -2128,6 +2181,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         UUID playerId = event.getPlayer().getUniqueId();
+        pendingLifeSacrifices.remove(playerId);
+        pendingMarketPurchases.remove(playerId);
         pendingMarketEdits.remove(playerId);
         marketEditStockSelections.remove(playerId);
         marketEditMarketSelections.remove(playerId);
@@ -2399,6 +2454,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         marketEditSessions.remove(player.getUniqueId());
         pendingMarketEdits.remove(player.getUniqueId());
+        pendingMarketPurchases.remove(player.getUniqueId());
+        pendingLifeSacrifices.remove(player.getUniqueId());
 
         if (!player.hasPermission("lastlife.market")) {
             player.sendMessage(ChatColor.RED + "You do not have permission to use the market.");
@@ -2425,6 +2482,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             player.sendMessage(ChatColor.RED + "You do not have permission to edit the market.");
             return;
         }
+        pendingLifeSacrifices.remove(player.getUniqueId());
         pendingMarketPurchases.remove(player.getUniqueId());
         pendingMarketEdits.remove(player.getUniqueId());
         marketEditSessions.add(player.getUniqueId());
@@ -2728,9 +2786,69 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private void openBlackMarketSelector(Player player) {
         MarketMenuHolder holder = new MarketMenuHolder(MarketView.BLACK_MARKET_SELECT, null, 0);
         holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_PURPLE + "Black Market");
-        holder.inventory.setItem(13, createMarketItem("ENDER_CHEST", ChatColor.LIGHT_PURPLE + "Duping Market",
+        holder.inventory.setItem(11, createMarketItem("ENDER_CHEST", ChatColor.LIGHT_PURPLE + "Duping Market",
                 ChatColor.GRAY + "Risk one item for a chance to duplicate it."));
+        holder.inventory.setItem(15, createMarketItem("WITHER_SKELETON_SKULL", ChatColor.RED + "Life Market",
+                ChatColor.GRAY + "Sacrifice lives for Heart Removers."));
         player.openInventory(holder.inventory);
+    }
+
+    private void openLifeMarket(Player player) {
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.LIFE_MARKET, null, 0);
+        holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_RED + "Life Market");
+        holder.inventory.setItem(11, createMarketItem("WITHER_SKELETON_SKULL", ChatColor.RED + "Sacrifice one life",
+                ChatColor.GRAY + "Risk a life for Heart Removers."));
+        holder.inventory.setItem(15, createMarketItem("PAPER", ChatColor.YELLOW + "Sacrifice lives in bulk",
+                ChatColor.GRAY + "Enter the number of lives in chat."));
+        holder.inventory.setItem(22, createMarketItem("ARROW", ChatColor.YELLOW + "Back to Black Market"));
+        player.openInventory(holder.inventory);
+    }
+
+    private void promptLifeSacrifice(Player player) {
+        UUID id = player.getUniqueId();
+        pendingMarketPurchases.remove(id);
+        pendingMarketEdits.remove(id);
+        pendingLifeSacrifices.put(id, 0);
+        player.closeInventory();
+        player.sendMessage(ChatColor.YELLOW + "Enter the number of lives to sacrifice, or type cancel.");
+    }
+
+    private void sacrificeLives(Player player, int amount) {
+        UUID id = player.getUniqueId();
+        int hearts = getHearts(id);
+        int removers = 0;
+        int processed = 0;
+        boolean banned = false;
+        for (int i = 0; i < amount; i++) {
+            processed++;
+            int roll = ThreadLocalRandom.current().nextInt(100);
+            if (roll >= 90) {
+                continue;
+            }
+            removers += roll < 30 ? 1 : roll < 60 ? 2 : 0;
+            if (hearts >= MAX_HEARTS) {
+                banned = true;
+                break;
+            }
+            hearts++;
+        }
+        playerData.set(playerPath(id) + ".hearts", hearts);
+        if (banned) {
+            playerData.set(playerPath(id) + ".death-banned", true);
+        }
+        savePlayerData();
+        for (int i = 0; i < removers; i++) {
+            Map<Integer, ItemStack> overflow = player.getInventory().addItem(createHeartRemover());
+            overflow.values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
+        }
+        player.sendMessage(ChatColor.YELLOW + "Life Market: " + processed + " sacrifice(s), "
+                + removers + " Heart Remover(s)." );
+        if (banned) {
+            Bukkit.getBanList(BanList.Type.NAME).addBan(player.getName(), BAN_REASON, null, getName());
+            player.kickPlayer(BAN_REASON);
+            return;
+        }
+        applyMaxHealth(player, false);
     }
 
     private void openDupingMarket(Player player) {
@@ -5070,6 +5188,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         MARKET_SELECT,
         BLACK_MARKET_SELECT,
         DUPING_MARKET,
+        LIFE_MARKET,
         STOCK_SELECT,
         STOCK_EDIT_OPTIONS,
         STOCK_DETAIL
