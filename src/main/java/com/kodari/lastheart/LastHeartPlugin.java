@@ -35,6 +35,8 @@ import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.advancement.Advancement;
 import org.bukkit.advancement.AdvancementProgress;
 import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Skull;
@@ -48,6 +50,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.World;
 import org.bukkit.entity.Evoker;
+import org.bukkit.entity.Creeper;
+import org.bukkit.entity.ComplexEntityPart;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.EnderDragon;
@@ -71,6 +75,10 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EnderDragonChangePhaseEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.event.entity.EntityToggleGlideEvent;
+import org.bukkit.event.entity.EntityChangeBlockEvent;
+import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.entity.ExplosionPrimeEvent;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -129,6 +137,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private NamespacedKey empoweredDragonKey;
     private NamespacedKey empoweredWitherKey;
     private NamespacedKey empoweredWardenKey;
+    private NamespacedKey creeperCaptainKey;
+    private NamespacedKey creeperRightHandKey;
+    private boolean applyingRightHandExplosionDamage;
+    private final Map<UUID, BossBar> creeperCaptainBars = new HashMap<>();
+    private final Map<UUID, Integer> creeperCaptainTimers = new HashMap<>();
     private NamespacedKey empoweredStrengthPotionKey;
     private NamespacedKey empoweredSpeedPotionKey;
     private NamespacedKey empoweredInstantHealthPotionKey;
@@ -188,6 +201,19 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private final Set<UUID> marketEditSessions = ConcurrentHashMap.newKeySet();
     private final Map<String, Supplier<ItemStack>> customItemFactories = new HashMap<>();
     private final List<String> customItemNames = new ArrayList<>();
+    private final Map<EnderDragon, Pursuit> marketPursuits = new HashMap<>();
+    private final Set<UUID> marketPursuitKills = new HashSet<>();
+
+    private static final class Pursuit {
+        private UUID target;
+        private int idleTicks;
+        private int warningTicks;
+        private Chunk chunk;
+
+        private Pursuit(UUID target) {
+            this.target = target;
+        }
+    }
 
     @Override
     public void onEnable() {
@@ -205,6 +231,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         empoweredDragonKey = new NamespacedKey(this, "empowered_dragon");
         empoweredWitherKey = new NamespacedKey(this, "empowered_wither");
         empoweredWardenKey = new NamespacedKey(this, "empowered_warden");
+        creeperCaptainKey = new NamespacedKey(this, "creeper_captain");
+        creeperRightHandKey = new NamespacedKey(this, "creeper_right_hand");
         empoweredStrengthPotionKey = new NamespacedKey(this, "empowered_strength_potion");
         empoweredSpeedPotionKey = new NamespacedKey(this, "empowered_speed_potion");
         empoweredInstantHealthPotionKey = new NamespacedKey(this, "empowered_instant_health_potion");
@@ -304,7 +332,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         getCommand("givecustom").setExecutor(this);
         getCommand("locateitem").setExecutor(this);
         getCommand("market").setExecutor(this);
+        getCommand("creepercaptain").setExecutor(this);
+        getCommand("creeperrighthand").setExecutor(this);
+        Bukkit.getScheduler().runTaskTimer(this, this::tickCreeperCaptains, 20L, 20L);
+        Bukkit.getScheduler().runTaskTimer(this, this::spawnNightCreeperCaptain, 1200L, 1200L);
         Bukkit.getScheduler().runTaskTimer(this, this::simulateMarketTrades, 20L, 20L);
+        Bukkit.getScheduler().runTaskTimer(this, this::tickMarketPursuits, 1L, 1L);
         Bukkit.getScheduler().runTaskTimer(this,
                 () -> Bukkit.getOnlinePlayers().forEach(player -> {
                     refreshWardenLeggingsEffects(player);
@@ -329,6 +362,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @Override
     public void onDisable() {
+        marketPursuits.keySet().forEach(EnderDragon::remove);
+        marketPursuits.values().forEach(pursuit -> {
+            if (pursuit.chunk != null) {
+                pursuit.chunk.removePluginChunkTicket(this);
+            }
+        });
+        marketPursuits.clear();
+        creeperCaptainBars.values().forEach(BossBar::removeAll);
+        creeperCaptainBars.clear();
+        creeperCaptainTimers.clear();
         for (Player player : Bukkit.getOnlinePlayers()) {
             removeSoulStealerModifier(player, soulStealerPenaltyModifierKey);
             removeSoulStealerModifier(player, soulStealerBonusModifierKey);
@@ -574,6 +617,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         UUID playerId = player.getUniqueId();
+        boolean killedByPursuer = marketPursuitKills.remove(playerId);
+        if (killedByPursuer) {
+            event.setDeathMessage(player.getName() + " was slain by _________");
+            event.setKeepInventory(false);
+            player.getInventory().clear();
+        }
+        for (Pursuit pursuit : marketPursuits.values()) {
+            if (!playerId.equals(pursuit.target)) {
+                continue;
+            }
+            pursuit.target = player.getWorld().getPlayers().stream()
+                    .filter(candidate -> !candidate.getUniqueId().equals(playerId) && !candidate.isDead())
+                    .filter(candidate -> candidate.getLocation().distanceSquared(player.getLocation()) <= 2500.0)
+                    .min(java.util.Comparator.comparingDouble(candidate ->
+                            candidate.getLocation().distanceSquared(player.getLocation())))
+                    .map(Player::getUniqueId).orElse(null);
+            pursuit.idleTicks = 0;
+            pursuit.warningTicks = 0;
+        }
         int hearts = getHearts(playerId);
 
         Player killer = player.getKiller();
@@ -591,6 +653,10 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             event.getDrops().add(fragments);
         } else if (ThreadLocalRandom.current().nextDouble() < Math.min(0.30, hearts * 0.03)) {
             event.getDrops().add(createSoulFragment());
+        }
+
+        if (killedByPursuer) {
+            event.getDrops().clear();
         }
 
         if (hearts >= MAX_HEARTS) {
@@ -1409,15 +1475,30 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onTotemTauntingDamage(EntityDamageByEntityEvent event) {
-        if (!(event.getDamager() instanceof Player attacker)
-                || !(event.getEntity() instanceof Player victim)) {
+        if (!(event.getEntity() instanceof Player victim)) {
             return;
         }
 
-        ItemStack weapon = attacker.getInventory().getItemInMainHand();
-        int tauntingLevel = getTotemTauntingLevel(weapon);
-        if (tauntingLevel <= 0
-                || (isSoulStealer(weapon) && getHearts(victim.getUniqueId()) <= 3)) {
+        int tauntingLevel;
+        if (event.getDamager() instanceof Player attacker) {
+            ItemStack weapon = attacker.getInventory().getItemInMainHand();
+            tauntingLevel = getTotemTauntingLevel(weapon);
+            if (isSoulStealer(weapon) && getHearts(victim.getUniqueId()) <= 3) {
+                return;
+            }
+        } else if (event.getDamager() instanceof Creeper creeper && isCreeperRightHand(creeper)) {
+            if (applyingRightHandExplosionDamage) {
+                for (DamageModifier modifier : DamageModifier.values()) {
+                    if (modifier != DamageModifier.BASE && event.isApplicable(modifier)) {
+                        event.setDamage(modifier, 0.0);
+                    }
+                }
+            }
+            tauntingLevel = 1;
+        } else {
+            return;
+        }
+        if (tauntingLevel <= 0) {
             return;
         }
 
@@ -1721,6 +1802,20 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         if (event.getView().getTopInventory().getHolder() instanceof MarketMenuHolder holder) {
+            if (holder.view == MarketView.DUPING_MARKET) {
+                if (event.getRawSlot() >= event.getView().getTopInventory().getSize()) {
+                    if (event.isShiftClick()) {
+                        event.setCancelled(true);
+                    }
+                    return;
+                }
+                event.setCancelled(true);
+                if (event.getRawSlot() >= 0 && (event.isLeftClick() || event.isRightClick())
+                        && event.getWhoClicked() instanceof Player player) {
+                    attemptDuplication(player, event);
+                }
+                return;
+            }
             if (event.getRawSlot() >= event.getView().getTopInventory().getSize()) {
                 if (event.isShiftClick()) {
                     event.setCancelled(true);
@@ -1739,7 +1834,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 player.sendMessage(ChatColor.RED + "You no longer have permission to edit the market.");
                 return;
             }
-            if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 11) {
+            if (holder.view == MarketView.BLACK_MARKET_SELECT && event.getRawSlot() == 13) {
+                openDupingMarket(player);
+            } else if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 11) {
                 openMarketStocks(player, MarketType.GOLD, 0, holder.editMode);
             } else if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 15) {
                 openMarketStocks(player, MarketType.ENCHANTED_GOLDEN_APPLE, 0, holder.editMode);
@@ -2113,12 +2210,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         switch (command.getName().toLowerCase()) {
             case "market" -> {
-                if (args.length == 0) {
-                    openMarket(sender);
+                if (args.length == 0 || (args.length == 1 && args[0].equalsIgnoreCase("normal"))) {
+                    openMarket(sender, false);
+                } else if (args.length == 1 && args[0].equalsIgnoreCase("black")) {
+                    openMarket(sender, true);
                 } else if (args.length == 1 && args[0].equalsIgnoreCase("edit")) {
                     openMarketEdit(sender);
                 } else {
-                    sender.sendMessage(ChatColor.RED + "Usage: /market [edit]");
+                    sender.sendMessage(ChatColor.RED + "Usage: /market [normal|black|edit]");
                 }
             }
             case "heartunban" -> unbanPlayer(sender, args);
@@ -2126,6 +2225,28 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             case "checkhearts" -> checkPlayerHearts(sender, args);
             case "givecustom" -> giveCustomItem(sender, args);
             case "locateitem" -> locateItem(sender, args);
+            case "creepercaptain" -> {
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage("Only players can summon the Creeper Captain.");
+                } else if (args.length != 0) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /creepercaptain");
+                } else if (hasNearbyCreeperCaptain(player.getLocation())) {
+                    sender.sendMessage(ChatColor.RED + "A Creeper Captain is already within 500 blocks.");
+                } else {
+                    spawnCreeperCaptain(player.getLocation());
+                }
+            }
+            case "creeperrighthand" -> {
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage("Only players can summon the Creeper's Right Hand Man.");
+                } else if (args.length != 0) {
+                    sender.sendMessage(ChatColor.RED + "Usage: /creeperrighthand");
+                } else if (hasNearbyCreeperBoss(player.getLocation(), true)) {
+                    sender.sendMessage(ChatColor.RED + "A Creeper's Right Hand Man is already within 500 blocks.");
+                } else {
+                    spawnCreeperBoss(player.getLocation(), true);
+                }
+            }
             default -> {
                 return false;
             }
@@ -2133,7 +2254,144 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         return true;
     }
 
-    private void openMarket(CommandSender sender) {
+    private void spawnNightCreeperCaptain() {
+        spawnNightCreeperBoss(false);
+        spawnNightCreeperBoss(true);
+    }
+
+    private void spawnNightCreeperBoss(boolean rightHand) {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        for (World world : Bukkit.getWorlds()) {
+            if (world.getEnvironment() != World.Environment.NORMAL || world.getTime() < 13000L
+                    || world.getTime() >= 23000L || world.getPlayers().isEmpty() || random.nextInt(100) >= (rightHand ? 20 : 5)) continue;
+            Player player = world.getPlayers().get(random.nextInt(world.getPlayers().size()));
+            double angle = random.nextDouble(Math.PI * 2.0);
+            int x = player.getLocation().getBlockX() + (int) Math.round(Math.cos(angle) * 24.0);
+            int z = player.getLocation().getBlockZ() + (int) Math.round(Math.sin(angle) * 24.0);
+            if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
+            Block ground = world.getHighestBlockAt(x, z);
+            if (!ground.getType().isSolid()) continue;
+            Location location = ground.getLocation().add(0.5, 1.0, 0.5);
+            if (!hasNearbyCreeperBoss(location, rightHand)) spawnCreeperBoss(location, rightHand);
+        }
+    }
+
+    private boolean hasNearbyCreeperCaptain(Location location) {
+        return hasNearbyCreeperBoss(location, false);
+    }
+
+    private boolean hasNearbyCreeperBoss(Location location, boolean rightHand) {
+        for (Creeper creeper : location.getWorld().getEntitiesByClass(Creeper.class)) {
+            if (!creeper.isDead() && (rightHand ? isCreeperRightHand(creeper) : isCreeperCaptain(creeper))
+                    && creeper.getLocation().distanceSquared(location) <= 250000.0) return true;
+        }
+        return false;
+    }
+
+    private void spawnCreeperCaptain(Location location) {
+        spawnCreeperBoss(location, false);
+    }
+
+    private void spawnCreeperBoss(Location location, boolean rightHand) {
+        Creeper captain = location.getWorld().spawn(location, Creeper.class);
+        captain.getPersistentDataContainer().set(rightHand ? creeperRightHandKey : creeperCaptainKey, PersistentDataType.BYTE, (byte) 1);
+        captain.setCustomName(ChatColor.GREEN + (rightHand ? "The Creeper's Right Hand Man" : "The Creeper Captain"));
+        captain.setCustomNameVisible(true);
+        captain.setRemoveWhenFarAway(false);
+        captain.getAttribute(maxHealthAttribute).setBaseValue(800.0);
+        captain.setHealth(800.0);
+        XAttribute.of("follow_range").ifPresent(attribute -> {
+            AttributeInstance range = captain.getAttribute(attribute.get());
+            if (range != null) range.setBaseValue(40.0);
+        });
+    }
+
+    private boolean isCreeperCaptain(Creeper creeper) {
+        return creeper.getPersistentDataContainer().has(creeperCaptainKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isCreeperRightHand(Creeper creeper) {
+        return creeper.getPersistentDataContainer().has(creeperRightHandKey, PersistentDataType.BYTE);
+    }
+
+    private void tickCreeperCaptains() {
+        Set<UUID> found = new HashSet<>();
+        for (World world : Bukkit.getWorlds()) {
+            for (Creeper captain : world.getEntitiesByClass(Creeper.class)) {
+                if ((!isCreeperCaptain(captain) && !isCreeperRightHand(captain)) || captain.isDead()) continue;
+                UUID id = captain.getUniqueId();
+                found.add(id);
+                boolean charged = captain.getHealth() <= 400.0;
+                if (charged && !captain.isPowered()) captain.setPowered(true);
+                BossBar bar = creeperCaptainBars.computeIfAbsent(id,
+                        ignored -> Bukkit.createBossBar(isCreeperRightHand(captain)
+                                ? "The Creeper's Right Hand Man" : "The Creeper Captain", BarColor.GREEN, BarStyle.SOLID));
+                bar.setProgress(Math.max(0.0, Math.min(1.0, captain.getHealth() / 800.0)));
+                Player nearest = null;
+                double nearestDistance = 1600.0;
+                for (Player player : world.getPlayers()) {
+                    double distance = player.getLocation().distanceSquared(captain.getLocation());
+                    if (distance <= 1600.0 && !player.isDead()) {
+                        bar.addPlayer(player);
+                        if (distance < nearestDistance) {
+                            nearestDistance = distance;
+                            nearest = player;
+                        }
+                    } else {
+                        bar.removePlayer(player);
+                    }
+                }
+                for (Player viewer : new ArrayList<>(bar.getPlayers())) {
+                    if (!viewer.getWorld().equals(world)) bar.removePlayer(viewer);
+                }
+                captain.setTarget(nearest);
+                int seconds = creeperCaptainTimers.getOrDefault(id, 0) + 1;
+                if (seconds >= 20) {
+                    int roll = ThreadLocalRandom.current().nextInt(100);
+                    int count = roll < 20 ? 3 : roll < 70 ? 4 : 5;
+                    for (int i = 0; i < count; i++) {
+                        Creeper minion = world.spawn(captain.getLocation(), Creeper.class);
+                        minion.setPowered(true);
+                        if (nearest != null) minion.setTarget(nearest);
+                    }
+                    seconds = 0;
+                }
+                creeperCaptainTimers.put(id, seconds);
+            }
+        }
+        for (UUID id : new HashSet<>(creeperCaptainBars.keySet())) {
+            if (!found.contains(id)) {
+                creeperCaptainBars.remove(id).removeAll();
+                creeperCaptainTimers.remove(id);
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onCreeperCaptainExplosion(ExplosionPrimeEvent event) {
+        if (!(event.getEntity() instanceof Creeper captain)
+                || (!isCreeperCaptain(captain) && !isCreeperRightHand(captain))) return;
+        boolean charged = captain.getHealth() <= 400.0;
+        event.setRadius(0.0f);
+        event.setFire(false);
+        for (Player player : captain.getWorld().getPlayers()) {
+            double distance = player.getLocation().distanceSquared(captain.getLocation());
+            if (distance <= 1600.0) {
+                double damage = isCreeperRightHand(captain)
+                        ? captain.getHealth() / (distance <= 400.0 ? (charged ? 10.0 : 30.0) : (charged ? 20.0 : 60.0))
+                        : (charged || distance <= 400.0 ? 1_000_000.0 : 20.0);
+                boolean previous = applyingRightHandExplosionDamage;
+                applyingRightHandExplosionDamage = isCreeperRightHand(captain);
+                try {
+                    player.damage(damage, captain);
+                } finally {
+                    applyingRightHandExplosionDamage = previous;
+                }
+            }
+        }
+    }
+
+    private void openMarket(CommandSender sender, boolean black) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage("Only players can open the market.");
             return;
@@ -2151,7 +2409,11 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             player.sendMessage(ChatColor.RED + "You do not have permission to use the market.");
             return;
         }
-        openMarketSelector(player);
+        if (black) {
+            openBlackMarketSelector(player);
+        } else {
+            openMarketSelector(player);
+        }
     }
 
     private void openMarketEdit(CommandSender sender) {
@@ -2461,6 +2723,195 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private void openMarketSelector(Player player) {
         openMarketSelector(player, false);
+    }
+
+    private void openBlackMarketSelector(Player player) {
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.BLACK_MARKET_SELECT, null, 0);
+        holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_PURPLE + "Black Market");
+        holder.inventory.setItem(13, createMarketItem("ENDER_CHEST", ChatColor.LIGHT_PURPLE + "Duping Market",
+                ChatColor.GRAY + "Risk one item for a chance to duplicate it."));
+        player.openInventory(holder.inventory);
+    }
+
+    private void openDupingMarket(Player player) {
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.DUPING_MARKET, null, 0);
+        holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_PURPLE + "Duping Market");
+        player.openInventory(holder.inventory);
+        player.sendMessage(ChatColor.GRAY + "Click an empty market slot with an item to risk one.");
+    }
+
+    private void attemptDuplication(Player player, InventoryClickEvent event) {
+        ItemStack cursor = event.getCursor();
+        if (isEmpty(cursor)) {
+            return;
+        }
+        if (cursor.hasItemMeta()) {
+            ItemMeta meta = cursor.getItemMeta();
+            boolean lastLifeItem = meta.getPersistentDataContainer().getKeys().stream()
+                    .anyMatch(key -> key.getNamespace().equals(soulFragmentKey.getNamespace()));
+            if (lastLifeItem || meta instanceof org.bukkit.inventory.meta.BlockStateMeta
+                    || meta instanceof org.bukkit.inventory.meta.BundleMeta) {
+                player.sendMessage(ChatColor.RED + "LastLife items and item containers cannot be duplicated.");
+                return;
+            }
+        }
+        ItemStack input = cursor.clone();
+        input.setAmount(1);
+        ItemStack remaining = cursor.clone();
+        remaining.setAmount(cursor.getAmount() - 1);
+        event.setCursor(remaining.getAmount() == 0 ? null : remaining);
+        int roll = ThreadLocalRandom.current().nextInt(100);
+        int returned = roll < 49 ? 2 : roll < 98 ? 0 : 1;
+        for (int i = 0; i < returned; i++) {
+            Map<Integer, ItemStack> overflow = player.getInventory().addItem(input.clone());
+            overflow.values().forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
+        }
+        player.sendMessage(roll < 49 ? ChatColor.GREEN + "Your item duplicated!"
+                : roll < 98 ? ChatColor.RED + "Your item was consumed."
+                : ChatColor.YELLOW + "Your item was returned unchanged.");
+        if (roll >= 98) {
+            spawnMarketPursuer(player);
+        }
+    }
+
+    private void spawnMarketPursuer(Player player) {
+        double angle = ThreadLocalRandom.current().nextDouble(Math.PI * 2.0);
+        Location spawn = player.getLocation().clone().add(Math.cos(angle) * 100.0, 0.0,
+                Math.sin(angle) * 100.0);
+        EnderDragon dragon = (EnderDragon) player.getWorld().spawnEntity(spawn, EntityType.ENDER_DRAGON);
+        dragon.setCustomName("_________");
+        dragon.setCustomNameVisible(true);
+        dragon.setAI(false);
+        dragon.setInvulnerable(true);
+        dragon.setPersistent(false);
+        dragon.setRemoveWhenFarAway(false);
+        Pursuit pursuit = new Pursuit(player.getUniqueId());
+        pursuit.chunk = spawn.getChunk();
+        pursuit.chunk.addPluginChunkTicket(this);
+        marketPursuits.put(dragon, pursuit);
+    }
+
+    private boolean isMarketPursuitTarget(Player player) {
+        return marketPursuits.values().stream().anyMatch(pursuit -> player.getUniqueId().equals(pursuit.target));
+    }
+
+    private void tickMarketPursuits() {
+        java.util.Iterator<Map.Entry<EnderDragon, Pursuit>> iterator = marketPursuits.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<EnderDragon, Pursuit> entry = iterator.next();
+            EnderDragon dragon = entry.getKey();
+            Pursuit pursuit = entry.getValue();
+            if (!dragon.isValid() || dragon.isDead()) {
+                if (pursuit.chunk != null) {
+                    pursuit.chunk.removePluginChunkTicket(this);
+                }
+                iterator.remove();
+                continue;
+            }
+            Player target = pursuit.target == null ? null : Bukkit.getPlayer(pursuit.target);
+            if (target == null || !target.isOnline() || target.isDead()) {
+                if (++pursuit.idleTicks >= 3600) {
+                    dragon.remove();
+                    pursuit.chunk.removePluginChunkTicket(this);
+                    iterator.remove();
+                }
+                continue;
+            }
+            pursuit.idleTicks = 0;
+            XPotion.matchXPotion("DARKNESS")
+                    .map(effect -> effect.buildPotionEffect(60, 4))
+                    .ifPresent(target::addPotionEffect);
+            if (target.isGliding()) {
+                target.setGliding(false);
+            }
+            if (target.isInWater()) {
+                target.setSwimming(false);
+                Vector velocity = target.getVelocity();
+                velocity.setY(-0.15);
+                target.setVelocity(velocity);
+            }
+            if (!dragon.getWorld().equals(target.getWorld())) {
+                Location destination = target.getLocation().clone().add(100.0, 0.0, 0.0);
+                updatePursuitChunk(pursuit, destination);
+                dragon.teleport(destination);
+                continue;
+            }
+            Vector direction = target.getLocation().toVector().subtract(dragon.getLocation().toVector());
+            if (++pursuit.warningTicks >= 400) {
+                pursuit.warningTicks = 0;
+                target.sendMessage(ChatColor.RED + "He is " + (int) Math.round(direction.length()) + " blocks away");
+            }
+            if (direction.lengthSquared() <= 9.0) {
+                marketPursuitKills.add(target.getUniqueId());
+                target.damage(1_000_000.0, dragon);
+                marketPursuitKills.remove(target.getUniqueId());
+                continue;
+            }
+            Location next = dragon.getLocation().add(direction.normalize().multiply(0.05));
+            next.setDirection(direction);
+            updatePursuitChunk(pursuit, next);
+            dragon.teleport(next);
+        }
+    }
+
+    private void updatePursuitChunk(Pursuit pursuit, Location location) {
+        Chunk next = location.getChunk();
+        if (!next.equals(pursuit.chunk)) {
+            next.addPluginChunkTicket(this);
+            if (pursuit.chunk != null) {
+                pursuit.chunk.removePluginChunkTicket(this);
+            }
+            pursuit.chunk = next;
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onMarketPursuerDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof EnderDragon dragon && marketPursuits.containsKey(dragon)
+                || event.getEntity() instanceof ComplexEntityPart part
+                && part.getParent() instanceof EnderDragon parent && marketPursuits.containsKey(parent)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onMarketPursuitSpearDamage(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player player && isMarketPursuitTarget(player)
+                && isPursuitSpear(player.getInventory().getItemInMainHand())) {
+            event.setCancelled(true);
+        }
+    }
+
+    private boolean isPursuitSpear(ItemStack item) {
+        return !isEmpty(item) && (item.getType().name().endsWith("_SPEAR") || isEmpoweredSpear(item));
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onMarketPursuitSpearUse(PlayerInteractEvent event) {
+        if (isMarketPursuitTarget(event.getPlayer()) && isPursuitSpear(event.getItem())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onMarketPursuitGlide(EntityToggleGlideEvent event) {
+        if (event.isGliding() && event.getEntity() instanceof Player player && isMarketPursuitTarget(player)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onMarketPursuerBlockChange(EntityChangeBlockEvent event) {
+        if (event.getEntity() instanceof EnderDragon dragon && marketPursuits.containsKey(dragon)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onMarketPursuerExplosion(EntityExplodeEvent event) {
+        if (event.getEntity() instanceof EnderDragon dragon && marketPursuits.containsKey(dragon)) {
+            event.setCancelled(true);
+        }
     }
 
     private void openMarketSelector(Player player, boolean editMode) {
@@ -4617,6 +5068,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private enum MarketView {
         MARKET_SELECT,
+        BLACK_MARKET_SELECT,
+        DUPING_MARKET,
         STOCK_SELECT,
         STOCK_EDIT_OPTIONS,
         STOCK_DETAIL

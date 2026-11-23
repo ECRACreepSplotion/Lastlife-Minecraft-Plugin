@@ -1,5 +1,5 @@
 name: LastLife
-version: 8.0.0
+version: 8.1.0
 main: com.kodari.lastheart.LastHeartPlugin
 api-version: '1.21'
 author: CreepSplotion
@@ -26,9 +26,20 @@ commands:
     usage: /locateitem <item name>
     permission: lastlife.locateitem
   market:
-    description: Opens the gold stock market.
-    usage: /market [edit]
+    description: Opens the normal or black market.
+    usage: /market [normal|black|edit]
+  creepercaptain:
+    description: Summons the Creeper Captain at your location.
+    usage: /creepercaptain
+    permission: lastlife.creepercaptain
+  creeperrighthand:
+    description: Summons the Creeper's Right Hand Man at your location.
+    usage: /creeperrighthand
+    permission: lastlife.creepercaptain
 permissions:
+  lastlife.creepercaptain:
+    description: Allows summoning the Creeper Captain.
+    default: op
   lastlife.unban:
     description: Allows unbanning players death-banned at ten hearts.
     default: op
