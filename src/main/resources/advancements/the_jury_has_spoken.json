@@ -1,0 +1,1 @@
+{"parent":"lastlife:justice_is_served","display":{"icon":{"id":"minecraft:netherite_sword"},"title":{"text":"The Jury Has Spoken"},"description":{"text":"...and have chosen, the Death Penalty"},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

@@ -1,0 +1,1 @@
+{"parent":"lastlife:soul_gathering","display":{"icon":{"id":"minecraft:prismarine_shard"},"title":{"text":"Successful Heist!"},"description":{"text":"Collect a Stealer Shard.","color":"gray"},"frame":"task","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

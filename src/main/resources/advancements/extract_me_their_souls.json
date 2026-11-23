@@ -1,0 +1,1 @@
+{"parent":"lastlife:factory_reset","display":{"icon":{"id":"minecraft:diamond_sword"},"title":{"text":"Extract Me Their Souls"},"description":{"text":"Craft The Soul Stealer."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

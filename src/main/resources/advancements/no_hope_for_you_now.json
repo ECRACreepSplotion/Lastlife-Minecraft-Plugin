@@ -1,0 +1,1 @@
+{"parent":"lastlife:it_actually_worked","display":{"icon":{"id":"minecraft:totem_of_undying"},"title":{"text":"No Hope For You Now"},"description":{"text":"Bypass two totem uses with Totem Taunting II."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

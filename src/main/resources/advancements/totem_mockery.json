@@ -1,0 +1,1 @@
+{"parent":"lastlife:successful_heist","display":{"icon":{"id":"minecraft:enchanted_book"},"title":{"text":"Totem Mockery!"},"description":{"text":"Apply Totem Taunting I to a weapon."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

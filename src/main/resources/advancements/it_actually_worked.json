@@ -1,0 +1,1 @@
+{"parent":"lastlife:totem_mockery","display":{"icon":{"id":"minecraft:totem_of_undying"},"title":{"text":"It Actually Worked?!"},"description":{"text":"Bypass a player's totem with Totem Taunting.","color":"gray"},"frame":"task","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

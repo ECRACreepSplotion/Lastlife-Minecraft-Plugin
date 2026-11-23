@@ -1,0 +1,1 @@
+{"parent":"lastlife:totem_mockery","display":{"icon":{"id":"minecraft:diamond_sword"},"title":{"text":"IRS AT YOUR DOOR!"},"description":{"text":"Apply Totem Taunting to The Soul Stealer."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

@@ -1,0 +1,1 @@
+{"parent":"lastlife:extract_me_their_souls","display":{"icon":{"id":"minecraft:diamond_sword"},"title":{"text":"Tax Collector"},"description":{"text":"Use Extraction on another player.","color":"gray"},"frame":"task","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

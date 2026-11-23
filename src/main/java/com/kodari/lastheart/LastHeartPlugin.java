@@ -193,6 +193,9 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     private final Set<UUID> activeSoulStealerPenalties = new HashSet<>();
     private final Set<UUID> pendingSoulStealerTotemBypass = new HashSet<>();
     private final Set<UUID> pendingSoulStealerDeaths = new HashSet<>();
+    private final Map<UUID, Player> extractionTotemKills = new HashMap<>();
+    private final Map<UUID, Player> tauntingKillAttackers = new HashMap<>();
+    private final Map<UUID, Integer> tauntingKillCounts = new HashMap<>();
     private final Map<UUID, PermissionAttachment> locatePermissionAttachments = new HashMap<>();
     private final Map<UUID, PendingMarketPurchase> pendingMarketPurchases = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> pendingLifeSacrifices = new ConcurrentHashMap<>();
@@ -309,6 +312,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 "advancements/memories_or_warnings.json");
         registerAdvancement(feelDizzyAdvancementKey, "advancements/i_feel_dizzy.json");
         registerAdvancement(iHateYouAdvancementKey, "advancements/i_hate_you.json");
+        for (String name : Arrays.asList("successful_heist", "factory_reset", "extract_me_their_souls",
+                "tax_collector", "its_only_april_14th", "government_approved_bankruptcy", "indefinite_debt",
+                "totem_mockery", "ii_totem_mockery", "irs_at_your_door", "it_actually_worked",
+                "no_hope_for_you_now", "justice_is_served", "the_jury_has_spoken")) {
+            registerAdvancement(new NamespacedKey(this, name), "advancements/" + name + ".json");
+        }
 
         playerDataFile = new File(getDataFolder(), "players.yml");
         if (!getDataFolder().exists() && !getDataFolder().mkdirs()) {
@@ -348,6 +357,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     refreshElderGuardianHelmetEffects(player);
                     refreshLocatePermission(player);
                     refreshSoulGatheringAdvancement(player);
+                    for (ItemStack item : player.getInventory().getContents()) {
+                        if (isStealerShard(item)) {
+                            awardAdvancement(player, new NamespacedKey(this, "successful_heist"));
+                            break;
+                        }
+                    }
                     refreshRiskyResetAdvancement(player);
                     refreshBackToSquareOneAdvancement(player);
                     refreshTheTotemTotemAdvancement(player);
@@ -658,6 +673,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         UUID playerId = player.getUniqueId();
+        Player extractionAttacker = extractionTotemKills.remove(playerId);
+        if (extractionAttacker != null) {
+            awardAdvancement(extractionAttacker, new NamespacedKey(this, "government_approved_bankruptcy"));
+        }
+        Player tauntingAttacker = tauntingKillAttackers.remove(playerId);
+        Integer bypassed = tauntingKillCounts.remove(playerId);
+        if (tauntingAttacker != null && bypassed != null) {
+            awardAdvancement(tauntingAttacker, new NamespacedKey(this, "justice_is_served"));
+            if (bypassed >= 2) {
+                awardAdvancement(tauntingAttacker, new NamespacedKey(this, "the_jury_has_spoken"));
+            }
+        }
         boolean killedByPursuer = marketPursuitKills.remove(playerId);
         if (killedByPursuer) {
             event.setDeathMessage(player.getName() + " was slain by _________");
@@ -1475,9 +1502,15 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
         UUID attackerId = attacker.getUniqueId();
         UUID victimId = victim.getUniqueId();
+        if (event.getFinalDamage() > 20.0) {
+            awardAdvancement(attacker, new NamespacedKey(this, "indefinite_debt"));
+        }
         if (attackerId.equals(victimId)
                 || activeSoulStealerPlayers.contains(attackerId)
                 || activeSoulStealerPlayers.contains(victimId)) {
+            if (!attackerId.equals(victimId)) {
+                awardAdvancement(victim, new NamespacedKey(this, "its_only_april_14th"));
+            }
             return;
         }
 
@@ -1497,12 +1530,17 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
 
             applySoulStealerModifier(attacker, soulStealerBonusModifierKey, 6.0);
+            awardAdvancement(attacker, new NamespacedKey(this, "tax_collector"));
             AttributeInstance attackerMaxHealth = attacker.getAttribute(maxHealthAttribute);
             if (attackerMaxHealth != null) {
                 attacker.setHealth(Math.min(attackerMaxHealth.getValue(), attacker.getHealth() + 6.0));
             }
 
             if (victimMaxHearts <= 3) {
+                if (isTotemOfUndying(victim.getInventory().getItemInMainHand())
+                        || isTotemOfUndying(victim.getInventory().getItemInOffHand())) {
+                    extractionTotemKills.put(victimId, attacker);
+                }
                 pendingSoulStealerDeaths.add(victimId);
                 victim.setHealth(0.0);
             } else {
@@ -1576,6 +1614,20 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 consumeHeldItem(victim, hand);
             }
             bypasses--;
+        }
+        int consumed = tauntingLevel - bypasses;
+        if (consumed > 0 && event.getDamager() instanceof Player attacker) {
+            awardAdvancement(attacker, new NamespacedKey(this, "it_actually_worked"));
+            if (tauntingLevel == 2 && consumed >= 2) {
+                awardAdvancement(attacker, new NamespacedKey(this, "no_hope_for_you_now"));
+            }
+            UUID id = victim.getUniqueId();
+            tauntingKillAttackers.put(id, attacker);
+            tauntingKillCounts.put(id, consumed);
+            Bukkit.getScheduler().runTaskLater(this, () -> {
+                tauntingKillAttackers.remove(id);
+                tauntingKillCounts.remove(id);
+            }, 1L);
         }
     }
 
@@ -1769,6 +1821,16 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         applyTotemTaunting(result, bookLevel);
         if (!creative) {
             player.setLevel(player.getLevel() - 5);
+        }
+        String materialName = target.getType().name();
+        if (materialName.endsWith("_SWORD") || materialName.endsWith("_AXE")
+                || materialName.endsWith("_SPEAR") || materialName.equals("MACE")
+                || materialName.equals("BOW") || materialName.equals("CROSSBOW")
+                || materialName.equals("TRIDENT")) {
+            awardAdvancement(player, new NamespacedKey(this, bookLevel == 1 ? "totem_mockery" : "ii_totem_mockery"));
+        }
+        if (isSoulStealer(target)) {
+            awardAdvancement(player, new NamespacedKey(this, "irs_at_your_door"));
         }
         if (target.getAmount() <= 1) {
             inventory.setItem(0, null);
@@ -2071,6 +2133,13 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         if (isHeartRemoverRecipe(event.getRecipe())
                 && !isHeartRemoverRecipeInput(event.getInventory().getMatrix())) {
             event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onCraftSoulStealer(CraftItemEvent event) {
+        if (event.getWhoClicked() instanceof Player player && isSoulStealer(event.getCurrentItem())) {
+            awardAdvancement(player, new NamespacedKey(this, "extract_me_their_souls"));
         }
     }
 
@@ -4300,6 +4369,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             }
         }
 
+        awardAdvancement(player, new NamespacedKey(this, "factory_reset"));
         Map<Integer, ItemStack> overflow = player.getInventory().addItem(createCompactedStealerShard());
         overflow.values().forEach(item -> player.getWorld()
                 .dropItemNaturally(player.getLocation(), item));

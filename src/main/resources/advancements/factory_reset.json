@@ -1,0 +1,1 @@
+{"parent":"lastlife:successful_heist","display":{"icon":{"id":"minecraft:prismarine_shard"},"title":{"text":"Factory Reset"},"description":{"text":"Craft a Compacted Stealer Shard."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

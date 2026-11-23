@@ -1,0 +1,1 @@
+{"parent":"lastlife:extract_me_their_souls","display":{"icon":{"id":"minecraft:shield"},"title":{"text":"It's Only April 14th"},"description":{"text":"Deflect an unavailable Extraction."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

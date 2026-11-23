@@ -1,0 +1,1 @@
+{"parent":"lastlife:government_approved_bankruptcy","display":{"icon":{"id":"minecraft:diamond_sword"},"title":{"text":"Indefinite Debt"},"description":{"text":"Deal more than 10 hearts of damage with The Soul Stealer."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

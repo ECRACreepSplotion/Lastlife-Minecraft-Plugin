@@ -1,0 +1,1 @@
+{"parent":"lastlife:no_hope_for_you_now","display":{"icon":{"id":"minecraft:iron_sword"},"title":{"text":"Justice Is Served!"},"description":{"text":"Bypass a player's totem with Totem Taunting and kill them."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}

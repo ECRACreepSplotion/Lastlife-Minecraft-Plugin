@@ -1,0 +1,1 @@
+{"parent":"lastlife:tax_collector","display":{"icon":{"id":"minecraft:totem_of_undying"},"title":{"text":"Government Approved Bankruptcy"},"description":{"text":"Kill a player through their totem with Extraction."},"frame":"challenge","show_toast":true,"announce_to_chat":true},"criteria":{"complete":{"trigger":"minecraft:impossible"}}}
