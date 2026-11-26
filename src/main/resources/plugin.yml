@@ -27,7 +27,7 @@ commands:
     permission: lastlife.locateitem
   market:
     description: Opens the normal or black market.
-    usage: /market [normal|black|edit]
+    usage: /market [normal [leaderboard [stocks]]|black|edit]
   creepercaptain:
     description: Summons the Creeper Captain at your location.
     usage: /creepercaptain

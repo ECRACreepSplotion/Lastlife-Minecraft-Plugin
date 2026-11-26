@@ -1956,6 +1956,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 promptLifeSacrifice(player);
             } else if (holder.view == MarketView.LIFE_MARKET && event.getRawSlot() == 22) {
                 openBlackMarketSelector(player);
+            } else if (holder.view == MarketView.LEADERBOARD_SELECT && event.getRawSlot() == 11) {
+                openMarketLeaderboard(player, MarketType.GOLD, holder.shareLeaderboard);
+            } else if (holder.view == MarketView.LEADERBOARD_SELECT && event.getRawSlot() == 15) {
+                openMarketLeaderboard(player, MarketType.ENCHANTED_GOLDEN_APPLE, holder.shareLeaderboard);
+            } else if (holder.view == MarketView.LEADERBOARD && event.getRawSlot() == 49) {
+                openMarketLeaderboardSelector(player, holder.shareLeaderboard);
             } else if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 11) {
                 openMarketStocks(player, MarketType.GOLD, 0, holder.editMode);
             } else if (holder.view == MarketView.MARKET_SELECT && event.getRawSlot() == 15) {
@@ -2341,12 +2347,18 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
             case "market" -> {
                 if (args.length == 0 || (args.length == 1 && args[0].equalsIgnoreCase("normal"))) {
                     openMarket(sender, false);
+                } else if (args.length == 2 && args[0].equalsIgnoreCase("normal")
+                        && args[1].equalsIgnoreCase("leaderboard")) {
+                    openMarket(sender, false, true);
+                } else if (args.length == 3 && args[0].equalsIgnoreCase("normal")
+                        && args[1].equalsIgnoreCase("leaderboard") && args[2].equalsIgnoreCase("stocks")) {
+                    openMarket(sender, false, true, true);
                 } else if (args.length == 1 && args[0].equalsIgnoreCase("black")) {
                     openMarket(sender, true);
                 } else if (args.length == 1 && args[0].equalsIgnoreCase("edit")) {
                     openMarketEdit(sender);
                 } else {
-                    sender.sendMessage(ChatColor.RED + "Usage: /market [normal|black|edit]");
+                    sender.sendMessage(ChatColor.RED + "Usage: /market [normal [leaderboard [stocks]]|black|edit]");
                 }
             }
             case "heartunban" -> unbanPlayer(sender, args);
@@ -2535,6 +2547,14 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
     }
 
     private void openMarket(CommandSender sender, boolean black) {
+        openMarket(sender, black, false);
+    }
+
+    private void openMarket(CommandSender sender, boolean black, boolean leaderboard) {
+        openMarket(sender, black, leaderboard, false);
+    }
+
+    private void openMarket(CommandSender sender, boolean black, boolean leaderboard, boolean shareLeaderboard) {
         if (!(sender instanceof Player player)) {
             sender.sendMessage("Only players can open the market.");
             return;
@@ -2556,6 +2576,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         }
         if (black) {
             openBlackMarketSelector(player);
+        } else if (leaderboard) {
+            openMarketLeaderboardSelector(player, shareLeaderboard);
         } else {
             openMarketSelector(player);
         }
@@ -2760,12 +2782,25 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 double changeScale = valueScale * naturalChangeScale;
                 boolean fakePlayerBuys = random.nextBoolean();
                 int fakeShares = random.nextInt(1, 51);
+                String traderId = "fake:" + UUID.randomUUID();
+                if (random.nextInt(4) == 0) {
+                    String bot = "Trader" + (1000 + random.nextInt(30));
+                    String holdingPath = "market_bots." + bot + "." + marketType.holdingsKey + "." + stockId;
+                    int owned = marketData.getInt(holdingPath, 0);
+                    if (fakePlayerBuys) {
+                        marketData.set(holdingPath, (long) owned + fakeShares > Integer.MAX_VALUE
+                                ? Integer.MAX_VALUE : owned + fakeShares);
+                    } else {
+                        marketData.set(holdingPath, Math.max(0, owned - fakeShares));
+                    }
+                    traderId = "fake:" + bot;
+                }
                 double tradeImpact = Math.min(0.05, fakeShares * 0.001 * changeScale);
                 double randomMarketMovement = random.nextDouble(-0.02, 0.02) * changeScale;
                 double direction = fakePlayerBuys ? tradeImpact : -tradeImpact;
                 updateMarketStockPrice(marketType,
                         stockId, currentPrice * (1.0 + direction + randomMarketMovement),
-                        "fake:" + UUID.randomUUID());
+                        traderId);
             }
             if (random.nextInt(600) == 0) {
                 if (marketType == MarketType.GOLD) {
@@ -2858,6 +2893,12 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                     }
                 } catch (IllegalArgumentException ignored) {
                 }
+            }
+        }
+        ConfigurationSection bots = marketData.getConfigurationSection("market_bots");
+        if (bots != null) {
+            for (String bot : bots.getKeys(false)) {
+                marketData.set("market_bots." + bot + "." + marketType.holdingsKey + "." + stockId, null);
             }
         }
         getLogger().info(marketType.displayName + " stock " + stockName
@@ -3143,6 +3184,74 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
                 ChatColor.GOLD + "Enchanted Golden Apple Market",
                 ChatColor.GRAY + "Trade shares priced in enchanted golden apples.",
                 ChatColor.YELLOW + "Click to browse stocks"));
+        player.openInventory(holder.inventory);
+    }
+
+    private void openMarketLeaderboardSelector(Player player, boolean shareLeaderboard) {
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.LEADERBOARD_SELECT, null, 0);
+        holder.shareLeaderboard = shareLeaderboard;
+        holder.inventory = Bukkit.createInventory(holder, 27, ChatColor.DARK_GREEN + "Markets");
+        holder.inventory.setItem(11, createMarketItem("GOLD_INGOT", ChatColor.GOLD + "Gold Market",
+                ChatColor.YELLOW + "Click to view the leaderboard"));
+        holder.inventory.setItem(15, createMarketItem("ENCHANTED_GOLDEN_APPLE",
+                ChatColor.GOLD + "Enchanted Golden Apple Market",
+                ChatColor.YELLOW + "Click to view the leaderboard"));
+        player.openInventory(holder.inventory);
+    }
+
+    private void openMarketLeaderboard(Player player, MarketType marketType, boolean shareLeaderboard) {
+        Map<String, Double> values = new HashMap<>();
+        for (String root : List.of("players", "market_bots")) {
+            ConfigurationSection owners = marketData.getConfigurationSection(root);
+            if (owners == null) continue;
+            for (String owner : owners.getKeys(false)) {
+                ConfigurationSection holdings = marketData.getConfigurationSection(
+                        root + "." + owner + "." + marketType.holdingsKey);
+                if (holdings == null) continue;
+                double value = 0.0;
+                for (String stock : holdings.getKeys(false)) {
+                    String stockPath = marketStockPath(marketType, stock);
+                    if (marketData.isConfigurationSection(stockPath)) {
+                        int shares = Math.max(0, holdings.getInt(stock));
+                        value += shareLeaderboard ? shares : shares * marketData.getDouble(stockPath + ".price", 1.0);
+                    }
+                }
+                if (value > 0.0) values.put(root + ":" + owner, value);
+            }
+        }
+        double total = values.values().stream().mapToDouble(Double::doubleValue).sum();
+        List<Map.Entry<String, Double>> rankings = new ArrayList<>(values.entrySet());
+        rankings.sort((a, b) -> {
+            int comparison = Double.compare(b.getValue(), a.getValue());
+            return comparison != 0 ? comparison : a.getKey().compareTo(b.getKey());
+        });
+        MarketMenuHolder holder = new MarketMenuHolder(MarketView.LEADERBOARD, null, 0, marketType, false);
+        holder.shareLeaderboard = shareLeaderboard;
+        holder.inventory = Bukkit.createInventory(holder, 54, ChatColor.DARK_GREEN
+                + (shareLeaderboard ? "Stock Leaderboard" : "Market Leaderboard"));
+        for (int i = 0; i < Math.min(25, rankings.size()); i++) {
+            Map.Entry<String, Double> entry = rankings.get(i);
+            String id = entry.getKey().substring(entry.getKey().indexOf(':') + 1);
+            String name = id;
+            if (entry.getKey().startsWith("players:")) {
+                try {
+                    String playerName = Bukkit.getOfflinePlayer(UUID.fromString(id)).getName();
+                    if (playerName != null) name = playerName;
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+            String amount = shareLeaderboard ? String.format(Locale.US, "%.0f shares", entry.getValue())
+                    : formatGoldPrice(entry.getValue()) + " " + marketType.currencyUnit;
+            holder.inventory.setItem(i, createMarketItem("PAPER", ChatColor.GOLD + "#" + (i + 1) + " " + name,
+                    ChatColor.YELLOW + String.format(Locale.US, "%.3f%%", entry.getValue() * 100.0 / total)
+                            + " (" + amount + ")"));
+        }
+        if (rankings.isEmpty()) holder.inventory.setItem(22, createMarketItem("PAPER", ChatColor.GRAY + "No shares owned yet"));
+        String totalAmount = shareLeaderboard ? String.format(Locale.US, "%.0f shares", total)
+                : formatGoldPrice(total) + " " + marketType.currencyUnit;
+        holder.inventory.setItem(45, createMarketItem("BOOK", ChatColor.GOLD + marketType.displayName,
+                ChatColor.GRAY + (shareLeaderboard ? "Total owned shares: " : "Total owned value: ") + totalAmount));
+        holder.inventory.setItem(49, createMarketItem("ARROW", ChatColor.YELLOW + "Back to markets"));
         player.openInventory(holder.inventory);
     }
 
@@ -5285,6 +5394,8 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
 
     private enum MarketView {
         MARKET_SELECT,
+        LEADERBOARD_SELECT,
+        LEADERBOARD,
         BLACK_MARKET_SELECT,
         DUPING_MARKET,
         LIFE_MARKET,
@@ -5332,6 +5443,7 @@ public final class LastHeartPlugin extends JavaPlugin implements Listener, Comma
         private final int page;
         private final MarketType marketType;
         private final boolean editMode;
+        private boolean shareLeaderboard;
         private final Map<Integer, String> stockSlots = new HashMap<>();
         private Inventory inventory;
 
